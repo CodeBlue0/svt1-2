@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SVT Arrow Explorer</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <header class="sidebar-header">
+          <p class="eyebrow">SVT</p>
+          <h1>Arrow Explorer</h1>
+        </header>
+
+        <div class="controls">
+          <label class="search-label" for="nameSearch">닉네임 검색</label>
+          <input id="nameSearch" class="search-input" type="search" autocomplete="off" />
+          <div class="control-row">
+            <button id="clearSelection" class="button" type="button">선택 해제</button>
+            <output id="selectionCount" class="selection-count">0 선택</output>
+          </div>
+        </div>
+
+        <section class="name-panel" aria-label="참가자 선택">
+          <div id="nameList" class="name-list"></div>
+        </section>
+      </aside>
+
+      <section class="chart-panel">
+        <div class="chart-topbar">
+          <div>
+            <p class="eyebrow">svt_1 → svt_2</p>
+            <h2>정답률과 평균 지연시간 변화</h2>
+          </div>
+          <div class="legend">
+            <span class="legend-item"><span class="swatch swatch-blue"></span>기본</span>
+            <span class="legend-item"><span class="swatch swatch-red"></span>선택</span>
+          </div>
+        </div>
+        <div class="chart-wrap">
+          <svg id="chart" class="chart" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="chartTitle chartDesc">
+            <title id="chartTitle">SVT 참가자별 변화 화살표</title>
+            <desc id="chartDesc">x축은 평균 지연시간 RT, y축은 정답률이며 체크된 참가자의 화살표가 빨간색으로 표시됩니다.</desc>
+          </svg>
+        </div>
+      </section>
+    </main>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

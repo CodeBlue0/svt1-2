@@ -1,0 +1,16 @@
+# Raw and extracted participant data
+svt_s*.zip
+extracted/
+tmp/
+
+# Generated metadata can contain names, IDs, filenames, and source paths
+metadata/
+
+# Local processing code references raw/private data fields
+scripts/
+
+# Local caches and OS/editor noise
+__pycache__/
+*.py[cod]
+.DS_Store
+
