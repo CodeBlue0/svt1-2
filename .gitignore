@@ -6,11 +6,15 @@ tmp/
 # Generated metadata can contain names, IDs, filenames, and source paths
 metadata/
 
-# Local processing code references raw/private data fields
-scripts/
+# Track the sanitized generator/tests; keep ad-hoc local scripts ignored
+scripts/*
+!scripts/
+!scripts/compute_svt_metrics.py
+!scripts/test_compute_svt_metrics.py
 
 # Local caches and OS/editor noise
 __pycache__/
 *.py[cod]
 .DS_Store
-
+.omx/
+.codex/

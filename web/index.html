@@ -3,51 +3,90 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SVT Arrow Explorer</title>
+    <title>SVT Compare Studio</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <aside class="sidebar">
-        <header class="sidebar-header">
-          <p class="eyebrow">인간기억과외국어학습</p>
-          <h1>SVT Analysis</h1>
-        </header>
-
-        <div class="controls">
-          <label class="search-label" for="nameSearch">닉네임 검색</label>
-          <input id="nameSearch" class="search-input" type="search" autocomplete="off" />
-          <div class="control-row">
-            <button id="clearSelection" class="button" type="button">선택 해제</button>
-            <output id="selectionCount" class="selection-count">0 선택</output>
+    <main class="site-shell">
+      <header class="hero-shell">
+        <nav class="top-nav" aria-label="SVT dashboard pages">
+          <a class="brand" href="index.html">SVT Studio</a>
+          <div class="nav-links">
+            <a class="nav-link active" href="index.html">비교</a>
+            <a class="nav-link" href="items.html">개인 분석</a>
+            <span class="nav-link disabled" aria-disabled="true" title="임시 비활성화">인사이트</span>
           </div>
-        </div>
-
-        <section class="name-panel" aria-label="참가자 선택">
+        </nav>
+        <section class="hero-grid">
+          <div>
+            <p class="eyebrow">page 1 · multi select</p>
+            <h1>SVT</h1>
+            <p id="datasetSummary" class="summary-text">로딩 중…</p>
+          </div>
+          <div class="control-card">
+            <label class="search-label" for="nameSearch">검색</label>
+            <div class="search-row">
+              <input id="nameSearch" class="search-input" type="search" autocomplete="off" placeholder="ID 입력" />
+              <button id="selectVisible" class="button" type="button">검색</button>
+              <button id="clearSelection" class="button ghost" type="button">초기화</button>
+            </div>
+            <output id="selectionCount" class="selection-count">0명 선택</output>
+          </div>
+        </section>
+        <section class="name-panel" aria-label="참가자">
           <div id="nameList" class="name-list"></div>
         </section>
-      </aside>
+      </header>
 
-      <section class="chart-panel">
-        <div class="chart-topbar">
-          <div>
-            <p class="eyebrow">svt_1 → svt_2</p>
-            <h2>정답률과 평균 지연시간 변화</h2>
+      <section class="dashboard-panel">
+        <section class="panel-section feature-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">priority graph</p>
+              <h2>RT × 정답률</h2>
+              <p class="summary-text">빨강=선택, 파랑=전체, 노랑=평균</p>
+            </div>
+            <div class="graph-controls">
+              <div class="legend">
+                <span class="legend-item"><span class="swatch swatch-blue"></span>전체</span>
+                <span class="legend-item"><span class="swatch swatch-red"></span>선택</span>
+                <span class="legend-item"><span class="swatch swatch-yellow"></span>평균</span>
+              </div>
+              <div id="transitionFilter" class="transition-filter" aria-label="구간"></div>
+            </div>
           </div>
-          <div class="legend">
-            <span class="legend-item"><span class="swatch swatch-blue"></span>기본</span>
-            <span class="legend-item"><span class="swatch swatch-red"></span>선택</span>
+          <div class="chart-stage">
+            <svg id="arrowChart" class="chart hero-chart" viewBox="0 0 1040 500" role="img" aria-label="RT 정답률 그래프"></svg>
           </div>
-        </div>
-        <div class="chart-wrap">
-          <svg id="chart" class="chart" viewBox="0 0 1100 760" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="chartTitle chartDesc">
-            <title id="chartTitle">SVT 참가자별 변화 화살표</title>
-            <desc id="chartDesc">x축은 평균 지연시간 RT, y축은 정답률이며 체크된 참가자의 화살표가 빨간색으로 표시됩니다.</desc>
-          </svg>
-        </div>
+        </section>
+
+        <section class="metric-strip" aria-label="요약">
+          <article class="stat-card"><span>선택</span><strong id="selectedPeople">0</strong></article>
+          <article class="stat-card"><span>차수</span><strong id="selectedRounds">-</strong></article>
+          <article class="stat-card"><span>RT</span><strong id="selectedRt">-</strong></article>
+          <article class="stat-card"><span>정답률</span><strong id="selectedAcc">-</strong></article>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">multi-person round trends</p>
+              <h2>차수별 변화</h2>
+            </div>
+          </div>
+          <div class="chart-grid two">
+            <article class="chart-card">
+              <h3>RT</h3>
+              <svg id="rtOverviewChart" class="chart" viewBox="0 0 720 320" role="img" aria-label="다중 참가자 RT 변화"></svg>
+            </article>
+            <article class="chart-card">
+              <h3>정답률</h3>
+              <svg id="accuracyOverviewChart" class="chart" viewBox="0 0 720 320" role="img" aria-label="정답률 변화"></svg>
+            </article>
+          </div>
+        </section>
       </section>
     </main>
-
     <script src="data.js"></script>
     <script src="app.js"></script>
   </body>
