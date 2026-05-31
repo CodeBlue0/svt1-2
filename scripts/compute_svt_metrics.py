@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import math
 import re
 import statistics
 import unicodedata
 import zipfile
+import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -58,7 +60,7 @@ ZIP_EXTRACTED_DIRS = {
     "SVT_6_525.zip": "SVT_6_525",
     "SVT_7_527.zip": "SVT_7_527",
 }
-LATE_DIR_MARKER = "늦은제출"
+LATE_DIR_MARKERS = ("늦은제출", "늦음제출")
 NAME_RE = re.compile(r"^(?P<name>.*?)(?P<short_id>\d{6})_(?P<upload_id>\d+)_(?P<record_id>\d+)_")
 DATE_RE = re.compile(r"(?P<date>20\d{2}-\d{2}-\d{2})(?:[_T](?P<hour>\d{2})h?(?P<minute>\d{2})?[.:]?(?P<second>\d{2})?)?")
 VALID_RESPONSE = {"O", "X"}
@@ -423,10 +425,93 @@ def assign_round(path: Path | CandidateSource, first_row_datetime: datetime | No
         return archive_round, "zip_archive", file_dt
     if parent in ROUND_DIRS:
         return ROUND_DIRS[parent], "folder", file_dt
-    if LATE_DIR_MARKER in parent and file_dt:
+    if any(marker in parent for marker in LATE_DIR_MARKERS) and file_dt:
         nearest_round = min(anchors, key=lambda round_number: (abs((file_dt.date() - anchors[round_number].date()).days), round_number))
         return nearest_round, "late_nearest_date", file_dt
     return None, "unassigned", file_dt
+
+
+def spreadsheet_cell_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat(sep=" ")
+    return nfc(value)
+
+
+def rows_to_csv_text(rows: list[list[Any]]) -> str:
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    for row in rows:
+        writer.writerow([spreadsheet_cell_to_text(value) for value in row])
+    return buffer.getvalue()
+
+
+def read_xlsx_as_csv_text(source: CandidateSource) -> tuple[str | None, str, str]:
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return None, "xlsx", "openpyxl is required for .xlsx files; run `python3 -m pip install -r requirements.txt`"
+    try:
+        workbook = load_workbook(io.BytesIO(source.read_bytes()), read_only=True, data_only=True)
+        sheet = workbook.worksheets[0]
+        rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+        workbook.close()
+        return rows_to_csv_text(rows), "xlsx/openpyxl", ""
+    except Exception as exc:
+        return None, "xlsx", f"xlsx parse error: {exc}"
+
+
+def read_numbers_as_csv_text(source: CandidateSource) -> tuple[str | None, str, str]:
+    try:
+        from numbers_parser import Document
+    except ImportError:
+        return None, "numbers", "numbers-parser is required for .numbers files; run `python3 -m pip install -r requirements.txt`"
+
+    tmp_path: str | None = None
+    try:
+        document_path = str(source.path) if source.path and source.path.exists() else None
+        if document_path is None:
+            with tempfile.NamedTemporaryFile(suffix=".numbers", delete=False) as tmp:
+                tmp.write(source.read_bytes())
+                tmp_path = tmp.name
+                document_path = tmp_path
+        document = Document(document_path)
+        best_rows: list[list[Any]] = []
+        best_score = -1
+        for sheet in document.sheets:
+            for table in sheet.tables:
+                rows = [[table.cell(row, col).value for col in range(table.num_cols)] for row in range(table.num_rows)]
+                header = [nfc(value).lower() for value in (rows[0] if rows else [])]
+                score = sum(1 for name in ("participant_id", "correct", "rt", "task") if name in header)
+                if score > best_score:
+                    best_rows = rows
+                    best_score = score
+        if not best_rows:
+            return None, "numbers/numbers-parser", "numbers file has no readable table"
+        return rows_to_csv_text(best_rows), "numbers/numbers-parser", ""
+    except Exception as exc:
+        return None, "numbers", f"numbers parse error: {exc}"
+    finally:
+        if tmp_path:
+            Path(tmp_path).unlink(missing_ok=True)
+
+
+def source_to_csv_text(source: CandidateSource) -> tuple[str | None, str, str]:
+    suffix = source.suffix.lower()
+    if suffix == ".csv":
+        return decode_bytes(source.read_bytes())
+    if suffix == ".xlsx":
+        return read_xlsx_as_csv_text(source)
+    if suffix == ".numbers":
+        return read_numbers_as_csv_text(source)
+    return None, suffix.lstrip(".") or "unknown", f"unsupported extension {source.suffix or '<none>'}"
 
 
 def iter_candidate_files() -> list[CandidateSource]:
@@ -453,11 +538,7 @@ def read_trials(path: Path | CandidateSource, anchors: dict[int, datetime]) -> t
     source = path if isinstance(path, CandidateSource) else CandidateSource.from_path(path)
     record_path = source.path or Path(source.rel_path)
     record = FileRecord(path=record_path, rel_path=source.rel_path, status="excluded")
-    if source.suffix.lower() != ".csv":
-        record.reason = f"unsupported extension {source.suffix or '<none>'}"
-        return record, []
-
-    text, encoding, decode_warning = decode_bytes(source.read_bytes())
+    text, encoding, decode_warning = source_to_csv_text(source)
     record.encoding = encoding
     if text is None:
         record.reason = decode_warning or "unreadable"

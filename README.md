@@ -26,8 +26,11 @@ edits them.
 ## Regenerate Data
 
 ```bash
+python3 -m pip install -r requirements.txt
 python3 scripts/compute_svt_metrics.py
 ```
+
+The generator reads `.csv`, `.xlsx`, and `.numbers` participant exports. `.xlsx` support uses `openpyxl`; `.numbers` support uses `numbers-parser`.
 
 The generator writes:
 
