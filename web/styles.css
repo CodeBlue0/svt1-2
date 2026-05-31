@@ -16,6 +16,7 @@
   --purple: #7c3aed;
   --shadow: 0 22px 55px rgba(31, 41, 55, 0.10);
   --soft-shadow: 0 12px 32px rgba(31, 41, 55, 0.07);
+  --ui-scale: .67;
 }
 
 * { box-sizing: border-box; }
@@ -37,6 +38,13 @@ a { color: inherit; }
   width: min(1480px, calc(100% - 32px));
   margin: 0 auto;
   padding: 18px 0 32px;
+  zoom: var(--ui-scale);
+}
+@supports not (zoom: 1) {
+  .site-shell {
+    transform: scale(var(--ui-scale));
+    transform-origin: top center;
+  }
 }
 .hero-shell,
 .panel-section,
@@ -55,8 +63,8 @@ a { color: inherit; }
   backdrop-filter: blur(14px);
 }
 .hero-shell {
-  position: sticky;
-  top: 12px;
+  position: relative;
+  top: auto;
   z-index: 20;
   display: grid;
   gap: 18px;
