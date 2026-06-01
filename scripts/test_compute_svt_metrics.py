@@ -62,6 +62,20 @@ def test_duplicate_selection_prefers_more_trials_then_later_date():
     assert duplicates[0]["selected_file"] == "b.csv"
 
 
+def test_kang_piljoong_s1_override_prefers_first_attempt():
+    first_path = "extracted/svt_s1/강필중202135_64122_5063969_PARTICIPANT_cst_2026-05-06_11h00.58.059.csv"
+    second_path = "extracted/svt_s1/강필중202135_64122_5063970_PARTICIPANT_cst_2026-05-06_11h05.09.297.csv"
+    first = m.FileRecord(Path(first_path), first_path, "candidate", identity_key="participant_id:applebanana", task="cst", round_number=1, file_datetime=datetime(2026, 5, 6, 11, 0), valid_trials=32)
+    second = m.FileRecord(Path(second_path), second_path, "candidate", identity_key="participant_id:applebanana", task="cst", round_number=1, file_datetime=datetime(2026, 5, 6, 11, 5), valid_trials=32)
+    selected, duplicates = m.choose_representative_files([first, second], {first_path: [trial(correct=0.0)], second_path: [trial(correct=1.0)]})
+    assert len(selected) == 1
+    assert selected[0].correct == 0.0
+    assert first.status == "selected"
+    assert second.status == "duplicate"
+    assert duplicates[0]["selected_file"] == first_path
+    assert "manually overridden" in duplicates[0]["reason"]
+
+
 def test_identity_resolution_merges_text_id_student_id_and_filename_name():
     numeric = m.FileRecord(
         Path("round1.csv"),
@@ -278,7 +292,7 @@ def test_public_payload_excludes_single_round_participants():
 
 
 def run_all():
-    for test in [test_late_round_assignment, test_duplicate_selection_prefers_more_trials_then_later_date, test_identity_resolution_merges_text_id_student_id_and_filename_name, test_confusion_stats, test_comparable_stimulus_ids_identifies_round1_only_items, test_zip_archive_round_assignment_and_reading, test_extracted_round_directory_assignment, test_iter_candidate_files_reads_real_zip_archive, test_iter_candidate_files_prefers_extracted_round_dir_over_matching_zip, test_model_fallback_and_privacy_payload, test_student_id_public_fallback_when_participant_id_missing, test_filename_short_id_public_fallback_when_student_id_missing, test_public_payload_excludes_single_round_participants]:
+    for test in [test_late_round_assignment, test_duplicate_selection_prefers_more_trials_then_later_date, test_kang_piljoong_s1_override_prefers_first_attempt, test_identity_resolution_merges_text_id_student_id_and_filename_name, test_confusion_stats, test_comparable_stimulus_ids_identifies_round1_only_items, test_zip_archive_round_assignment_and_reading, test_extracted_round_directory_assignment, test_iter_candidate_files_reads_real_zip_archive, test_iter_candidate_files_prefers_extracted_round_dir_over_matching_zip, test_model_fallback_and_privacy_payload, test_student_id_public_fallback_when_participant_id_missing, test_filename_short_id_public_fallback_when_student_id_missing, test_public_payload_excludes_single_round_participants]:
         test()
     print("fixture tests passed")
 

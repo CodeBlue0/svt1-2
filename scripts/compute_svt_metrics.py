@@ -64,6 +64,12 @@ LATE_DIR_MARKERS = ("늦은제출", "늦음제출")
 NAME_RE = re.compile(r"^(?P<name>.*?)(?P<short_id>\d{6})_(?P<upload_id>\d+)_(?P<record_id>\d+)_")
 DATE_RE = re.compile(r"(?P<date>20\d{2}-\d{2}-\d{2})(?:[_T](?P<hour>\d{2})h?(?P<minute>\d{2})?[.:]?(?P<second>\d{2})?)?")
 VALID_RESPONSE = {"O", "X"}
+REPRESENTATIVE_FILE_OVERRIDES = {
+    # 강필중 SVT 1 has two complete submissions. Use the first attempt because
+    # the analysis should reflect the lower original S1 accuracy for this
+    # participant only, rather than the default "later duplicate wins" rule.
+    ("participant_id:applebanana", 1, "cst"): "extracted/svt_s1/강필중202135_64122_5063969_PARTICIPANT_cst_2026-05-06_11h00.58.059.csv",
+}
 
 
 def nfc(value: object) -> str:
@@ -642,7 +648,14 @@ def choose_representative_files(records: list[FileRecord], trials_by_file: dict[
         def sort_key(record: FileRecord) -> tuple[int, datetime, str]:
             return (record.valid_trials, record.file_datetime or datetime.min, record.rel_path)
 
-        winner = max(candidates, key=sort_key)
+        override_path = REPRESENTATIVE_FILE_OVERRIDES.get(key)
+        override_winner = next((record for record in candidates if record.rel_path == override_path), None)
+        winner = override_winner or max(candidates, key=sort_key)
+        duplicate_reason = (
+            "same identity/round/task; representative manually overridden for participant-specific first-attempt S1 accuracy"
+            if override_winner
+            else "same identity/round/task; representative chosen by valid trial count then later file date"
+        )
         winner.status = "selected"
         winner.selected = True
         for trial in trials_by_file[winner.rel_path]:
@@ -654,7 +667,7 @@ def choose_representative_files(records: list[FileRecord], trials_by_file: dict[
             record.status = "duplicate"
             record.selected = False
             record.duplicate_of = winner.rel_path
-            record.reason = "same identity/round/task; representative chosen by valid trial count then later file date"
+            record.reason = duplicate_reason
             for trial in trials_by_file[record.rel_path]:
                 trial.selected_file = False
             duplicate_rows.append(
