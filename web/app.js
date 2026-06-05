@@ -23,6 +23,10 @@
     arrowChart: document.getElementById("arrowChart"),
     rtOverviewChart: document.getElementById("rtOverviewChart"),
     accuracyOverviewChart: document.getElementById("accuracyOverviewChart"),
+    demographicSummary: document.getElementById("demographicSummary"),
+    handednessBars: document.getElementById("handednessBars"),
+    ageBars: document.getElementById("ageBars"),
+    genderBars: document.getElementById("genderBars"),
     selectedPeople: document.getElementById("selectedPeople"),
     selectedRounds: document.getElementById("selectedRounds"),
     selectedRt: document.getElementById("selectedRt"),
@@ -392,6 +396,49 @@
       });
     });
   }
+  function renderDistributionBars(target, distribution, options = {}) {
+    if (!target) return;
+    target.textContent = "";
+    const items = distribution?.items || [];
+    const total = distribution?.total || 0;
+    if (!items.length || distribution?.unavailable) {
+      const empty = document.createElement("p");
+      empty.className = "empty-state demographic-empty";
+      empty.textContent = options.unavailableText || "수집된 데이터 없음";
+      target.append(empty);
+      return;
+    }
+    items.forEach((item, index) => {
+      const row = document.createElement("div");
+      row.className = "bar-row demographic-row";
+      const label = document.createElement("span");
+      label.className = "bar-label";
+      label.textContent = item.label;
+      const track = document.createElement("span");
+      track.className = "bar-track";
+      const fill = document.createElement("span");
+      fill.className = `bar-fill ${options.tone || (index % 3 === 1 ? "green" : index % 3 === 2 ? "amber" : "")}`.trim();
+      fill.style.width = `${Math.max(0, Math.min(100, (item.ratio || 0) * 100))}%`;
+      track.append(fill);
+      const value = document.createElement("strong");
+      value.className = "bar-value";
+      value.textContent = `${item.count}명 · ${formatPercent(item.ratio)}`;
+      row.title = `${item.label}: ${item.count}/${total}명 (${formatPercent(item.ratio)})`;
+      row.append(label, track, value);
+      target.append(row);
+    });
+  }
+  function renderDemographics() {
+    const demographics = data.demographics || {};
+    const n = demographics.participantCount || participants.length;
+    if (els.demographicSummary) {
+      els.demographicSummary.textContent = `${n}명 기준 · 성별은 원자료에 컬럼이 없어 계산 불가`;
+    }
+    renderDistributionBars(els.handednessBars, demographics.dominantHand);
+    renderDistributionBars(els.ageBars, demographics.age, { tone: "green" });
+    renderDistributionBars(els.genderBars, demographics.gender, { unavailableText: "성별 컬럼 없음" });
+  }
+
   function renderNameList() {
     const visible = visibleParticipants();
     els.nameList.textContent = "";
@@ -437,7 +484,7 @@
     const personSelectionCount = Array.from(selected).filter((id) => id !== AVERAGE_ID).length;
     els.selectionCount.textContent = `${personSelectionCount}명${averageSelected ? " + 평균" : ""} 선택`;
   }
-  function renderAll() { renderNameList(); renderTransitionFilter(); renderArrowChart(); renderOverview(els.rtOverviewChart, "rt"); renderOverview(els.accuracyOverviewChart, "accuracy"); renderStats(); }
+  function renderAll() { renderNameList(); renderTransitionFilter(); renderArrowChart(); renderOverview(els.rtOverviewChart, "rt"); renderOverview(els.accuracyOverviewChart, "accuracy"); renderStats(); renderDemographics(); }
 
   els.datasetSummary.textContent = `${participants.length}명 · ${data.quality?.selectedTrialCount || 0} trials · 공통 ${data.itemCatalog?.commonItems?.length || 0} · 제외 ${data.quality?.ignoredNonComparableTrialCount || 0}`;
   els.nameSearch.addEventListener("input", renderNameList);

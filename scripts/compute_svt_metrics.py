@@ -330,9 +330,12 @@ class Trial:
     correct_answer: str
     correct: float | None
     rt: float | None
-    timestamp: str
-    file_datetime: datetime | None
-    row_datetime: datetime | None
+    age: str = ""
+    dominant_hand: str = ""
+    gender: str = ""
+    timestamp: str = ""
+    file_datetime: datetime | None = None
+    row_datetime: datetime | None = None
     selected_file: bool = True
     rt_sd3_excluded: bool = False
 
@@ -613,6 +616,9 @@ def read_trials(path: Path | CandidateSource, anchors: dict[int, datetime]) -> t
                 correct_answer=correct_answer,
                 correct=correct,
                 rt=rt,
+                age=value(row, indexes, "age"),
+                dominant_hand=value(row, indexes, "dominant_hand"),
+                gender=value(row, indexes, "gender") or value(row, indexes, "sex") or value(row, indexes, "성별"),
                 timestamp=value(row, indexes, "timestamp"),
                 file_datetime=file_dt,
                 row_datetime=parse_datetime_from_row(row, indexes),
@@ -717,6 +723,100 @@ def round_float(value: float | None, digits: int = 6) -> float | None:
     if value is None or not math.isfinite(value):
         return None
     return round(value, digits)
+
+
+def most_common_value(values: list[str]) -> str:
+    clean = [nfc(value) for value in values if nfc(value)]
+    if not clean:
+        return ""
+    counts: dict[str, int] = defaultdict(int)
+    for value in clean:
+        counts[value] += 1
+    return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def normalize_hand(value: str) -> str:
+    raw = nfc(value).lower()
+    if not raw:
+        return "unknown"
+    if raw in {"right", "r", "오른손", "오른손잡이", "우", "우손"}:
+        return "right"
+    if raw in {"left", "l", "왼손", "왼손잡이", "좌", "좌손"}:
+        return "left"
+    if raw in {"both", "ambidextrous", "양손", "양손잡이"}:
+        return "both"
+    return raw
+
+
+def normalize_gender(value: str) -> str:
+    raw = nfc(value).lower()
+    if not raw:
+        return "unknown"
+    if raw in {"m", "male", "man", "남", "남성", "남자"}:
+        return "male"
+    if raw in {"f", "female", "woman", "여", "여성", "여자"}:
+        return "female"
+    return raw
+
+
+def distribution_payload(values: list[str], labels: dict[str, str] | None = None, unavailable: bool = False) -> dict[str, Any]:
+    labels = labels or {}
+    counts: dict[str, int] = defaultdict(int)
+    for value in values:
+        key = value or "unknown"
+        counts[key] += 1
+    total = sum(counts.values())
+    def sort_key(item: tuple[str, int]) -> tuple[int, Any]:
+        key, count = item
+        if key.isdigit():
+            return (0, int(key))
+        if key == "unknown":
+            return (2, key)
+        return (1, key)
+    return {
+        "total": total,
+        "unavailable": unavailable,
+        "items": [
+            {
+                "key": key,
+                "label": labels.get(key, key),
+                "count": count,
+                "ratio": round_float(count / total, 4) if total else None,
+            }
+            for key, count in sorted(counts.items(), key=sort_key)
+        ],
+    }
+
+
+def build_demographics(participants: list[dict[str, Any]]) -> dict[str, Any]:
+    included = [participant for participant in participants if len(participant.get("rounds", {})) >= 2]
+    age_values: list[str] = []
+    hand_values: list[str] = []
+    gender_values: list[str] = []
+    for participant in included:
+        demographics = participant.get("demographics", {})
+        age = nfc(demographics.get("age", ""))
+        if age:
+            age_values.append(age)
+        else:
+            age_values.append("unknown")
+        hand_values.append(normalize_hand(demographics.get("dominantHand", "")))
+        gender_values.append(normalize_gender(demographics.get("gender", "")))
+    has_gender_data = any(value != "unknown" for value in gender_values)
+    return {
+        "participantCount": len(included),
+        "basis": "public_participants_with_two_or_more_rounds",
+        "age": distribution_payload(age_values, {"unknown": "미상"}),
+        "dominantHand": distribution_payload(
+            hand_values,
+            {"right": "오른손", "left": "왼손", "both": "양손", "unknown": "미상"},
+        ),
+        "gender": distribution_payload(
+            gender_values,
+            {"male": "남성", "female": "여성", "unknown": "데이터 없음"},
+            unavailable=not has_gender_data,
+        ),
+    }
 
 
 def confusion_stats(trials: list[Trial]) -> dict[str, Any] | None:
@@ -1028,6 +1128,11 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
             {
                 "id": key,
                 "nickname": display_name(student_ids, participant_ids, names, key),
+                "demographics": {
+                    "age": most_common_value([t.age for t in person_trials]),
+                    "dominantHand": most_common_value([t.dominant_hand for t in person_trials]),
+                    "gender": most_common_value([t.gender for t in person_trials]),
+                },
                 "studentIds": sorted(student_ids),
                 "shortIds": sorted(short_ids),
                 "participantIds": sorted(participant_ids),
@@ -1066,6 +1171,7 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
         "rounds": [{"round": number, "label": label} for number, label in ROUND_LABELS.items()],
         "itemCatalog": build_item_catalog(trials),
         "participants": participants,
+        "demographics": build_demographics(participants),
         "metricsRows": metrics_rows,
         "cleanTrialRows": clean_trial_rows,
         "quality": {
@@ -1173,6 +1279,7 @@ def compact_for_web(summary: dict[str, Any]) -> dict[str, Any]:
         "generatedAt": summary["generatedAt"],
         "rounds": summary["rounds"],
         "itemCatalog": summary.get("itemCatalog", {}),
+        "demographics": summary.get("demographics", {}),
         "quality": {
             "sourceFileCount": quality.get("sourceFileCount", 0),
             "selectedFileCount": quality.get("selectedFileCount", 0),

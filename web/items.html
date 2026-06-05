@@ -61,10 +61,29 @@
 
         <section class="panel-section">
           <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">answer transition by next test</p>
+              <h2>이전→다음 정오답 변화</h2>
+              <p class="summary-text">공통 문항 중 양쪽 회차 모두 응답한 문항 기준</p>
+            </div>
+          </div>
+          <div id="transitionList" class="transition-list"></div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact">
             <div><p class="eyebrow">common 176 items</p><h2>문항 지도</h2><p class="summary-text">공통 문항 176개</p></div>
             <div class="legend item-legend"><span class="legend-item"><span class="grass-swatch green"></span>정답</span><span class="legend-item"><span class="grass-swatch red"></span>오답</span><span class="legend-item"><span class="grass-swatch gray"></span>미실시</span></div>
           </div>
           <div id="itemGrid" class="item-grid-panel"></div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact">
+            <div><p class="eyebrow">common 176 items · per-item RT scale</p><h2>문항지도-개별 문제 RT</h2><p class="summary-text">각 문항의 R1~R RT 범위 기준</p></div>
+            <div class="legend item-legend"><span class="legend-item"><span class="grass-swatch green"></span>정답</span><span class="legend-item"><span class="grass-swatch red"></span>오답</span><span class="legend-item"><span class="grass-swatch gray"></span>미실시</span></div>
+          </div>
+          <div id="itemRtGrid" class="item-grid-panel"></div>
         </section>
 
       </section>

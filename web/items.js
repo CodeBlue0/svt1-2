@@ -12,7 +12,9 @@
     modelChart: document.getElementById("modelChart"),
     modelEquations: document.getElementById("modelEquations"),
     confusionList: document.getElementById("confusionList"),
+    transitionList: document.getElementById("transitionList"),
     itemGrid: document.getElementById("itemGrid"),
+    itemRtGrid: document.getElementById("itemRtGrid"),
   };
   const colors = { red: "#ef4444", blue: "#2563eb" };
   const itemTooltip = document.createElement("div");
@@ -158,6 +160,70 @@
     });
   }
 
+  function correctnessBucket(result) {
+    if (!Number.isFinite(result?.correct)) return null;
+    return result.correct >= 0.5 ? "correct" : "wrong";
+  }
+  function transitionCounts(participant, previousRound, nextRound) {
+    const previousResults = participant.itemResults?.[String(previousRound.actualRound || previousRound.round)] || {};
+    const nextResults = participant.itemResults?.[String(nextRound.actualRound || nextRound.round)] || {};
+    const counts = { wrongToCorrect: 0, wrongToWrong: 0, correctToCorrect: 0, correctToWrong: 0, compared: 0 };
+    commonItems.forEach((item) => {
+      const previous = correctnessBucket(previousResults[item.id]);
+      const next = correctnessBucket(nextResults[item.id]);
+      if (!previous || !next) return;
+      counts.compared += 1;
+      if (previous === "wrong" && next === "correct") counts.wrongToCorrect += 1;
+      else if (previous === "wrong" && next === "wrong") counts.wrongToWrong += 1;
+      else if (previous === "correct" && next === "correct") counts.correctToCorrect += 1;
+      else if (previous === "correct" && next === "wrong") counts.correctToWrong += 1;
+    });
+    return counts;
+  }
+  function appendTransitionCell(grid, label, value, tone) {
+    const cell = document.createElement("div");
+    cell.className = `transition-cell ${tone || ""}`.trim();
+    const labelNode = document.createElement("span");
+    labelNode.className = "transition-label";
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.className = "transition-value";
+    valueNode.textContent = `${value}개`;
+    cell.append(labelNode, valueNode);
+    grid.append(cell);
+  }
+  function renderAnswerTransitions(participant) {
+    clear(els.transitionList);
+    const rounds = participantRounds(participant);
+    if (rounds.length < 2) {
+      const empty = document.createElement("p");
+      empty.className = "empty-state";
+      empty.textContent = "비교할 다음 회차가 없습니다.";
+      els.transitionList.append(empty);
+      return;
+    }
+    for (let index = 1; index < rounds.length; index += 1) {
+      const previousRound = rounds[index - 1];
+      const nextRound = rounds[index];
+      const counts = transitionCounts(participant, previousRound, nextRound);
+      const card = document.createElement("article");
+      card.className = "transition-card";
+      const heading = document.createElement("h3");
+      heading.textContent = `${previousRound.displayLabel || `R${previousRound.attemptIndex || previousRound.round}`} → ${nextRound.displayLabel || `R${nextRound.attemptIndex || nextRound.round}`}`;
+      const meta = document.createElement("p");
+      meta.className = "transition-meta";
+      meta.textContent = `${counts.compared}/${commonItems.length}문항 비교`;
+      const grid = document.createElement("div");
+      grid.className = "transition-grid";
+      appendTransitionCell(grid, "이전 오답 → 다음 정답", counts.wrongToCorrect, "green");
+      appendTransitionCell(grid, "이전 오답 → 다음 오답", counts.wrongToWrong, "red");
+      appendTransitionCell(grid, "이전 정답 → 다음 정답", counts.correctToCorrect, "green");
+      appendTransitionCell(grid, "이전 정답 → 다음 오답", counts.correctToWrong, "red");
+      card.append(heading, meta, grid);
+      els.transitionList.append(card);
+    }
+  }
+
   function byCategory(items) {
     return items.reduce((acc, item) => {
       const category = item.itemCategory || "Unknown";
@@ -175,6 +241,12 @@
     const weight = index - lower;
     return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
   }
+  function rtExtentFromValues(values) {
+    const clean = values.filter(Number.isFinite);
+    if (!clean.length) return [0, 1];
+    const sorted = clean.sort((a, b) => a - b);
+    return [percentile(sorted, 0.1), percentile(sorted, 0.9)];
+  }
   function personalRtExtent(participant, items = commonItems) {
     const itemIds = new Set(items.map((item) => item.id));
     const values = [];
@@ -183,9 +255,16 @@
         if (itemIds.has(itemId) && Number.isFinite(result.rt)) values.push(result.rt);
       });
     });
-    if (!values.length) return [0, 1];
-    const sorted = values.sort((a, b) => a - b);
-    return [percentile(sorted, 0.1), percentile(sorted, 0.9)];
+    return rtExtentFromValues(values);
+  }
+  function perItemRtExtents(participant, items = commonItems) {
+    const valuesByItem = Object.fromEntries(items.map((item) => [item.id, []]));
+    Object.values(participant?.itemResults || {}).forEach((roundResults) => {
+      Object.entries(roundResults || {}).forEach(([itemId, result]) => {
+        if (valuesByItem[itemId] && Number.isFinite(result.rt)) valuesByItem[itemId].push(result.rt);
+      });
+    });
+    return Object.fromEntries(Object.entries(valuesByItem).map(([itemId, values]) => [itemId, rtExtentFromValues(values)]));
   }
   function intensity(rt, minRt, maxRt) {
     if (!Number.isFinite(rt)) return 0.32;
@@ -218,9 +297,8 @@
     heading.textContent = `${category} (${count})`;
     section.append(heading);
   }
-  function renderCommonGrid(participant) {
-    clear(els.itemGrid);
-    const [minRt, maxRt] = personalRtExtent(participant, commonItems);
+  function renderItemGrid(participant, target, rtExtentForItem) {
+    clear(target);
     Object.entries(byCategory(commonItems)).forEach(([category, items]) => {
       const section = document.createElement("article");
       section.className = "item-category-card";
@@ -240,6 +318,7 @@
         cells.className = "grass-cells";
         items.forEach((item) => {
           const result = roundResults[item.id];
+          const [minRt, maxRt] = rtExtentForItem(item);
           const cell = document.createElement("span");
           cell.className = "grass-cell";
           cell.style.background = cellColor(result, minRt, maxRt);
@@ -258,8 +337,15 @@
         row.append(label, cells);
         section.append(row);
       });
-      els.itemGrid.append(section);
+      target.append(section);
     });
+  }
+  function renderCommonGrid(participant) {
+    const globalExtent = personalRtExtent(participant, commonItems);
+    renderItemGrid(participant, els.itemGrid, () => globalExtent);
+
+    const itemExtents = perItemRtExtents(participant, commonItems);
+    renderItemGrid(participant, els.itemRtGrid, (item) => itemExtents[item.id] || [0, 1]);
   }
   function render() {
     const participant = currentParticipant();
@@ -275,6 +361,7 @@
     els.meta.textContent = `${completed}회 · ${trials} selected trials · 공통 ${commonItems.length}문항${emptyNote}`;
     renderModel(participant);
     renderConfusion(participant);
+    renderAnswerTransitions(participant);
     renderCommonGrid(participant);
   }
 
