@@ -8,7 +8,9 @@
   const AVERAGE_ID = "__average__";
   let selectedTransitionStart = null;
   let compactSelectedTrajectory = false;
-  let hideAllTrajectories = false;
+  let showAllTrajectories = false;
+  let autoTransitionActive = false;
+  let autoTransitionTimer = null;
 
   const els = {
     datasetSummary: document.getElementById("datasetSummary"),
@@ -146,6 +148,37 @@
     const end = series.find((point) => point.round === selectedTransitionStart + 1);
     return start && end ? [start, end] : [];
   }
+  function lastTransitionStart() {
+    return Math.max(1, maxAttempts - 1);
+  }
+  function stopAutoTransition() {
+    autoTransitionActive = false;
+    if (autoTransitionTimer) {
+      clearInterval(autoTransitionTimer);
+      autoTransitionTimer = null;
+    }
+  }
+  function advanceAutoTransition() {
+    const lastStart = lastTransitionStart();
+    selectedTransitionStart = selectedTransitionStart && selectedTransitionStart < lastStart
+      ? selectedTransitionStart + 1
+      : 1;
+  }
+  function startAutoTransition() {
+    autoTransitionActive = true;
+    if (!Number.isFinite(selectedTransitionStart) || selectedTransitionStart < 1 || selectedTransitionStart > lastTransitionStart()) {
+      selectedTransitionStart = 1;
+    }
+    if (autoTransitionTimer) return;
+    autoTransitionTimer = setInterval(() => {
+      advanceAutoTransition();
+      renderAll();
+    }, 1400);
+  }
+  function setAutoTransition(enabled) {
+    if (enabled) startAutoTransition();
+    else stopAutoTransition();
+  }
   function renderTransitionFilter() {
     if (!els.transitionFilter) return;
     els.transitionFilter.textContent = "";
@@ -155,6 +188,7 @@
     els.transitionFilter.append(title);
     const options = [
       { value: "all", label: "전체" },
+      ...(maxAttempts > 1 ? [{ value: "auto", label: "Auto" }] : []),
       ...Array.from({ length: Math.max(0, maxAttempts - 1) }, (_, i) => {
         const start = i + 1;
         return { value: String(start), label: `R${start}→R${start + 1}` };
@@ -167,9 +201,18 @@
       input.type = "radio";
       input.name = "trajectory-transition";
       input.value = option.value;
-      input.checked = option.value === "all" ? selectedTransitionStart === null : selectedTransitionStart === Number(option.value);
+      input.checked = option.value === "auto"
+        ? autoTransitionActive
+        : !autoTransitionActive && (option.value === "all" ? selectedTransitionStart === null : selectedTransitionStart === Number(option.value));
       input.addEventListener("change", () => {
         if (!input.checked) return;
+        if (option.value === "auto") {
+          selectedTransitionStart = 1;
+          setAutoTransition(true);
+          renderAll();
+          return;
+        }
+        setAutoTransition(false);
         selectedTransitionStart = option.value === "all" ? null : Number(option.value);
         renderAll();
       });
@@ -192,19 +235,19 @@
     compactLabel.append(compactInput, compactText);
     els.transitionFilter.append(compactLabel);
 
-    const hideAllLabel = document.createElement("label");
-    hideAllLabel.className = "transition-option transition-option-hide-all";
-    const hideAllInput = document.createElement("input");
-    hideAllInput.type = "checkbox";
-    hideAllInput.checked = hideAllTrajectories;
-    hideAllInput.addEventListener("change", () => {
-      hideAllTrajectories = hideAllInput.checked;
+    const blueToggleLabel = document.createElement("label");
+    blueToggleLabel.className = "transition-option transition-option-blue-toggle";
+    const blueToggleInput = document.createElement("input");
+    blueToggleInput.type = "checkbox";
+    blueToggleInput.checked = showAllTrajectories;
+    blueToggleInput.addEventListener("change", () => {
+      showAllTrajectories = blueToggleInput.checked;
       renderAll();
     });
-    const hideAllText = document.createElement("span");
-    hideAllText.textContent = "파랑 끄기";
-    hideAllLabel.append(hideAllInput, hideAllText);
-    els.transitionFilter.append(hideAllLabel);
+    const blueToggleText = document.createElement("span");
+    blueToggleText.textContent = "파랑 표시";
+    blueToggleLabel.append(blueToggleInput, blueToggleText);
+    els.transitionFilter.append(blueToggleLabel);
   }
 
   function renderArrowChart() {
@@ -278,7 +321,7 @@
       });
     }
 
-    if (!hideAllTrajectories) participantEntries.forEach((entry) => drawParticipantTrajectory({ participant: entry.participant, highlighted: false, series: entry.fullSeries }));
+    if (showAllTrajectories) participantEntries.forEach((entry) => drawParticipantTrajectory({ participant: entry.participant, highlighted: false, series: entry.selectedSeries }));
     if (isAverageSelected() && averageSeries.length) {
       if (!compactSelectedTrajectory) {
         averageSeries.forEach((point) => {
