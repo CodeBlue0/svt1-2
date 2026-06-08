@@ -18,13 +18,125 @@
         </nav>
         <section class="hero-grid">
           <div>
-            <p class="eyebrow">cohort insight</p>
+            <p class="eyebrow">5-round change clustering</p>
             <h1>그룹별 분석</h1>
+            <p id="clusterSummary" class="summary-text">5회 이상 제출자의 baseline 대비 변화 곡선을 DTW로 분석합니다.</p>
+          </div>
+          <div class="control-card">
+            <label class="search-label">그룹 선택</label>
+            <div id="groupList" class="group-select-list" role="radiogroup" aria-label="그룹 선택"></div>
           </div>
         </section>
       </header>
 
-      <section class="dashboard-panel group-analysis-panel"></section>
+      <section class="dashboard-panel group-analysis-panel" aria-label="그룹별 분석">
+        <section class="panel-section feature-panel">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">2D tendency manifold</p>
+              <h2>참가자 경향 지도</h2>
+              <p class="summary-text">DTW 거리행렬을 2D로 투영해, 비슷한 변화 곡선을 가진 참가자가 가깝게 보이도록 배치합니다.</p>
+            </div>
+            <div class="legend" id="manifoldLegend" aria-label="경향 지도 범례"></div>
+          </div>
+          <div class="chart-stage manifold-stage">
+            <svg id="manifoldMap" class="chart manifold-chart" viewBox="0 0 1040 560" role="img" aria-label="참가자 변화 경향 2D 지도"></svg>
+          </div>
+        </section>
+
+        <section class="panel-section feature-panel">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">priority graph</p>
+              <h2>RT × 정답률</h2>
+              <p class="summary-text">선택 그룹의 회차별 평균 궤적</p>
+            </div>
+            <div class="graph-controls">
+              <div class="legend">
+                <span class="legend-item"><span class="swatch swatch-red"></span>그룹 평균</span>
+                <span class="legend-item"><span class="swatch swatch-blue"></span>개인</span>
+              </div>
+              <div id="groupMemberControls" class="member-filter" aria-label="그룹 내 개인 선택"></div>
+            </div>
+          </div>
+          <div class="chart-stage">
+            <svg id="groupArrowChart" class="chart hero-chart" viewBox="0 0 1040 500" role="img" aria-label="그룹 평균 RT 정답률 그래프"></svg>
+          </div>
+        </section>
+
+        <section class="metric-strip" aria-label="선택 그룹 요약">
+          <article class="stat-card"><span>차수</span><strong id="groupSelectedRounds">-</strong></article>
+          <article class="stat-card"><span>RT</span><strong id="groupSelectedRt">-</strong></article>
+          <article class="stat-card"><span>정답률</span><strong id="groupSelectedAcc">-</strong></article>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">selected group trends</p>
+              <h2>차수별 변화</h2>
+            </div>
+          </div>
+          <div class="chart-grid two">
+            <article class="chart-card">
+              <h3>RT</h3>
+              <svg id="groupRtOverviewChart" class="chart" viewBox="0 0 720 320" role="img" aria-label="그룹 평균 RT 변화"></svg>
+            </article>
+            <article class="chart-card">
+              <h3>정답률</h3>
+              <svg id="groupAccuracyOverviewChart" class="chart" viewBox="0 0 720 320" role="img" aria-label="그룹 평균 정답률 변화"></svg>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel-section feature-panel">
+          <div class="section-heading personal-heading">
+            <div>
+              <p class="eyebrow">group analysis</p>
+              <h2 id="selectedGroupTitle">반응시간, 정확도 분석</h2>
+              <p id="selectedGroupMeta" class="summary-text"></p>
+            </div>
+          </div>
+          <div class="chart-grid">
+            <article class="chart-card">
+              <div class="chart-card-heading">
+                <h3>모델</h3>
+                <div class="model-legend" aria-label="범례">
+                  <span><i class="dot-red"></i>그룹 평균</span>
+                  <span><i class="line-blue"></i>변화선</span>
+                </div>
+              </div>
+              <svg id="groupModelChart" class="chart" viewBox="0 0 720 340" role="img" aria-label="그룹 평균 RT와 정답률 변화"></svg>
+              <div id="groupModelEquations" class="model-equations" aria-label="그룹 평균 요약"></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact"><div><p class="eyebrow">group confusion matrix</p><h2>O/X 응답 분석</h2></div></div>
+          <div id="groupConfusionList" class="confusion-list"></div>
+        </section>
+
+        <section class="panel-section">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">answer transition by next test</p>
+              <h2>이전→다음 정오답 변화</h2>
+              <p class="summary-text">그룹 구성원의 공통 문항 응답을 합산한 값입니다.</p>
+            </div>
+          </div>
+          <div id="groupTransitionList" class="transition-list"></div>
+          <div class="transition-line-panel">
+            <div class="legend transition-line-legend" aria-label="전환 그래프 범례">
+              <span class="legend-item"><span class="swatch swatch-red"></span>모르는 내용(오답 유지)</span>
+              <span class="legend-item"><span class="swatch swatch-yellow"></span>실수(정답→오답)</span>
+            </div>
+            <svg id="groupTransitionLineChart" class="chart transition-line-chart" viewBox="0 0 1040 500" role="img" aria-label="그룹 오답 유지와 정답에서 오답 전환 개수 그래프"></svg>
+          </div>
+        </section>
+      </section>
     </main>
+    <script src="data.js"></script>
+    <script src="insights.js"></script>
   </body>
 </html>

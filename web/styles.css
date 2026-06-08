@@ -209,6 +209,16 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
 .name-primary, .name-secondary { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .name-primary { font-size: 14px; font-weight: 900; }
 .name-secondary { margin-top: 1px; color: var(--muted); font-size: 11px; font-weight: 750; }
+.group-select-list { display: grid; gap: 8px; max-height: 260px; overflow: auto; }
+.group-select-option { display: grid; grid-template-columns: auto 10px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px 12px; border: 1px solid #d8e1ea; border-radius: 14px; background: #fff; color: var(--ink); font-size: 13px; font-weight: 900; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease; }
+.group-select-option:hover { transform: translateY(-1px); border-color: rgba(37, 99, 235, .28); box-shadow: 0 10px 20px rgba(15, 23, 42, .08); }
+.group-select-option.is-selected { border-color: rgba(239, 68, 68, .34); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .18), 0 10px 22px rgba(239, 68, 68, .1); }
+.group-select-option input { margin: 0; accent-color: var(--red); }
+.group-select-color { width: 10px; height: 28px; border-radius: 999px; }
+.member-filter { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: min(620px, 100%); max-height: 122px; overflow: auto; padding: 4px; border: 1px solid #d8e1ea; border-radius: 16px; background: linear-gradient(180deg, #f8fafc, #eef3f8); }
+.member-filter-option { position: relative; display: inline-flex; align-items: center; min-height: 34px; padding: 0 10px; border-radius: 12px; color: #536272; background: rgba(255,255,255,.42); font-size: 12px; font-weight: 900; white-space: nowrap; cursor: pointer; }
+.member-filter-option.is-selected { color: var(--ink); background: #fff; box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .18), 0 6px 14px rgba(15, 23, 42, .08); }
+.member-filter-option input { position: absolute; opacity: 0; pointer-events: none; }
 
 .dashboard-panel { display: grid; gap: 18px; }
 .panel-section { min-width: 0; overflow: hidden; border-radius: 24px; }
@@ -233,6 +243,7 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
 .legend-item { display: inline-flex; align-items: center; gap: 7px; font-weight: 820; }
 .swatch { width: 34px; height: 4px; border-radius: 999px; }
 .swatch-red { background: var(--red); }
+.swatch-blue { background: var(--blue); }
 .swatch-yellow { background: #f59e0b; box-shadow: 0 0 0 5px rgba(245, 158, 11, .16); }
 .metric-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .stat-card { display: grid; gap: 6px; min-height: 96px; padding: 18px; border-radius: 22px; }
@@ -534,6 +545,17 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
 .risk-rank { display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, var(--red), #b91c1c); font-weight: 950; }
 .risk-card strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .risk-card p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }
+.cluster-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 12px; padding: 14px; }
+.cluster-card { display: grid; gap: 12px; padding: 16px; border: 1px solid rgba(219, 229, 238, 0.86); border-radius: 20px; background: var(--panel); box-shadow: var(--soft-shadow); }
+.cluster-card-heading { display: flex; gap: 10px; align-items: flex-start; }
+.cluster-color { flex: 0 0 auto; width: 12px; height: 42px; border-radius: 999px; }
+.cluster-card h3 { margin: 0; font-size: 17px; font-weight: 950; }
+.cluster-card-heading p { margin: 4px 0 0; color: var(--muted); font-size: 13px; font-weight: 850; }
+.cluster-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.cluster-metrics div { padding: 10px; border-radius: 14px; background: #f8fafc; }
+.cluster-metrics dt { color: var(--muted); font-size: 12px; font-weight: 900; }
+.cluster-metrics dd { margin: 4px 0 0; color: var(--ink); font-size: 18px; font-weight: 950; }
+.cluster-members { margin: 0; color: var(--muted); font-size: 13px; font-weight: 760; line-height: 1.5; }
 
 @media (max-width: 1100px) {
   .hero-shell { position: relative; top: auto; }
@@ -573,3 +595,18 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
   justify-content: center;
   min-height: 42px;
 }
+
+.manifold-stage { padding: 14px; }
+.manifold-chart { min-height: 460px; }
+.manifold-legend-dot { width: 11px; height: 11px; border-radius: 999px; box-shadow: 0 0 0 5px rgba(15, 23, 42, .06); }
+.axis-zero { stroke: rgba(15, 23, 42, .18); stroke-width: 1.2; stroke-dasharray: 5 6; }
+.manifold-cluster-halo { opacity: .075; pointer-events: none; }
+.manifold-cluster-halo.is-selected { opacity: .13; }
+.manifold-point { cursor: pointer; outline: none; }
+.manifold-point circle { stroke: rgba(255, 255, 255, .92); stroke-width: 2.4; filter: drop-shadow(0 4px 9px rgba(15, 23, 42, .16)); transition: r .14s ease, stroke-width .14s ease; }
+.manifold-point:hover circle,
+.manifold-point:focus-visible circle { r: 8.5; stroke-width: 3.2; }
+.manifold-point.is-selected circle { stroke: #17212b; stroke-width: 2.8; }
+.manifold-label { fill: var(--ink); paint-order: stroke; stroke: rgba(255, 255, 255, .9); stroke-width: 4px; stroke-linejoin: round; font-size: 12px; font-weight: 950; }
+.member-round-label { fill: var(--blue); stroke-width: 3.4px; font-size: 11px; }
+.model-round-label { fill: var(--red); stroke-width: 3.2px; font-size: 11px; }

@@ -124,7 +124,10 @@
           }));
         }
       }
-      observed.forEach((point) => els.modelChart.append(makeSvg("circle", { cx: x(point.x), cy: y(point.y), r: 4.5, fill: colors.red, "fill-opacity": 0.82 })));
+      observed.forEach((point) => {
+        els.modelChart.append(makeSvg("circle", { cx: x(point.x), cy: y(point.y), r: 4.5, fill: colors.red, "fill-opacity": 0.82 }));
+        els.modelChart.append(textNode(String(point.x), { class: "round-label model-round-label", x: x(point.x), y: y(point.y) - 11, "text-anchor": "middle" }));
+      });
       els.modelChart.append(textNode(panel.label, { class: "axis-label", x: left + plotW / 2, y: 18, "text-anchor": "middle" }));
     });
     renderModelEquations(equations);
