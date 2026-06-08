@@ -6,9 +6,10 @@
   const selected = new Set();
   const svgNS = "http://www.w3.org/2000/svg";
   const AVERAGE_ID = "__average__";
+  const DEFAULT_PARTICIPANT_ID = "applebanana";
   let selectedTransitionStart = null;
   let compactSelectedTrajectory = false;
-  let showAllTrajectories = false;
+  let zoomToSelection = true;
   let autoTransitionActive = false;
   let autoTransitionTimer = null;
 
@@ -18,16 +19,11 @@
     nameList: document.getElementById("nameList"),
     clearSelection: document.getElementById("clearSelection"),
     selectVisible: document.getElementById("selectVisible"),
-    selectionCount: document.getElementById("selectionCount"),
     transitionFilter: document.getElementById("transitionFilter"),
+    zoomToSelection: document.getElementById("zoomToSelection"),
     arrowChart: document.getElementById("arrowChart"),
     rtOverviewChart: document.getElementById("rtOverviewChart"),
     accuracyOverviewChart: document.getElementById("accuracyOverviewChart"),
-    demographicSummary: document.getElementById("demographicSummary"),
-    handednessBars: document.getElementById("handednessBars"),
-    ageBars: document.getElementById("ageBars"),
-    genderBars: document.getElementById("genderBars"),
-    selectedPeople: document.getElementById("selectedPeople"),
     selectedRounds: document.getElementById("selectedRounds"),
     selectedRt: document.getElementById("selectedRt"),
     selectedAcc: document.getElementById("selectedAcc"),
@@ -68,8 +64,11 @@
   function participantRounds(participant) {
     return Object.values(participant.rounds || {}).sort((a, b) => (a.attemptIndex || a.round) - (b.attemptIndex || b.round));
   }
+  function attemptNumber(round) {
+    return round?.attemptIndex || round?.round || "";
+  }
   function labelWithDate(round) {
-    return `${round.displayLabel || `R${round.attemptIndex || round.round}`}${round.date ? ` (${round.date})` : ""}`;
+    return `${attemptNumber(round)}${round.date ? ` (${round.date})` : ""}`;
   }
   function metricSeries(participant, metric) {
     return participantRounds(participant).map((round) => {
@@ -101,7 +100,7 @@
       const rt = mean(rts);
       const accuracy = mean(accuracies);
       return Number.isFinite(rt) && Number.isFinite(accuracy)
-        ? { round: attempt, label: `R${attempt} 평균`, rt, accuracy, rtSd: sampleSd(rts), accuracySd: sampleSd(accuracies), n: points.length }
+        ? { round: attempt, label: `${attempt} 평균`, rt, accuracy, rtSd: sampleSd(rts), accuracySd: sampleSd(accuracies), n: points.length }
         : null;
     }).filter(Boolean);
   }
@@ -112,6 +111,23 @@
     if (min === max) { min -= 1; max += 1; }
     const pad = (max - min) * padRatio;
     return [Math.max(0, min - pad), max + pad];
+  }
+  function boundedExtent(values, fallback = [0, 1], padRatio = 0.14, minBound = 0, maxBound = Infinity, minSpan = 0) {
+    const clean = values.filter(Number.isFinite);
+    if (!clean.length) return fallback;
+    let min = Math.min(...clean), max = Math.max(...clean);
+    const currentSpan = max - min;
+    const targetSpan = Math.max(currentSpan, minSpan);
+    if (targetSpan > currentSpan) {
+      const mid = (min + max) / 2;
+      min = mid - targetSpan / 2;
+      max = mid + targetSpan / 2;
+    }
+    const pad = (max - min) * padRatio;
+    min = Math.max(minBound, min - pad);
+    max = Math.min(maxBound, max + pad);
+    if (max <= min) return fallback;
+    return [min, max];
   }
   function drawAxes(svg, cfg) {
     const { width, height, left, right, top, bottom, xMin, xMax, yMin, yMax, xTicks, yTicks, xLabel, yLabel, yFormat } = cfg;
@@ -137,15 +153,38 @@
   }
   function appendArrowMarkers(svg) {
     const defs = makeSvg("defs");
-    [["arrow-all", colors.blue, .48], ["arrow-selected", colors.red, .96], ["arrow-average", colors.yellow, .98]].forEach(([id, color, opacity]) => {
+    [["arrow-selected", colors.red, .96], ["arrow-average", colors.yellow, .98]].forEach(([id, color, opacity]) => {
       const marker = makeSvg("marker", { id, viewBox: "0 0 10 10", refX: 8.5, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" });
       marker.append(makeSvg("path", { d: "M0 0 L10 5 L0 10 z", fill: color, "fill-opacity": opacity }));
       defs.append(marker);
     });
     svg.append(defs);
   }
-  function selectOnly(id) { selected.clear(); selected.add(id); renderAll(); }
   function isAverageSelected() { return selected.has(AVERAGE_ID); }
+  function selectedParticipantId() {
+    return Array.from(selected).find((id) => id !== AVERAGE_ID) || "";
+  }
+  function defaultParticipantId() {
+    return participants.some((participant) => participant.id === DEFAULT_PARTICIPANT_ID)
+      ? DEFAULT_PARTICIPANT_ID
+      : participants[0]?.id || "";
+  }
+  function setSingleParticipant(id) {
+    const keepAverage = isAverageSelected();
+    selected.clear();
+    if (keepAverage) selected.add(AVERAGE_ID);
+    if (id) selected.add(id);
+  }
+  function emitParticipantSelection() {
+    const id = selectedParticipantId();
+    window.SVT_SELECTED_PARTICIPANT_ID = id;
+    window.dispatchEvent(new CustomEvent("svt:participant-selection-change", { detail: { id } }));
+  }
+  function selectOnly(id, shouldEmit = true) {
+    setSingleParticipant(id);
+    renderAll();
+    if (shouldEmit) emitParticipantSelection();
+  }
   function filteredTransitionSeries(series) {
     if (selectedTransitionStart === null) return series;
     const start = series.find((point) => point.round === selectedTransitionStart);
@@ -195,7 +234,7 @@
       ...(maxAttempts > 1 ? [{ value: "auto", label: "Auto" }] : []),
       ...Array.from({ length: Math.max(0, maxAttempts - 1) }, (_, i) => {
         const start = i + 1;
-        return { value: String(start), label: `R${start}→R${start + 1}` };
+        return { value: String(start), label: `${start}→${start + 1}` };
       }),
     ];
     options.forEach((option) => {
@@ -238,20 +277,6 @@
     compactText.textContent = "작게";
     compactLabel.append(compactInput, compactText);
     els.transitionFilter.append(compactLabel);
-
-    const blueToggleLabel = document.createElement("label");
-    blueToggleLabel.className = "transition-option transition-option-blue-toggle";
-    const blueToggleInput = document.createElement("input");
-    blueToggleInput.type = "checkbox";
-    blueToggleInput.checked = showAllTrajectories;
-    blueToggleInput.addEventListener("change", () => {
-      showAllTrajectories = blueToggleInput.checked;
-      renderAll();
-    });
-    const blueToggleText = document.createElement("span");
-    blueToggleText.textContent = "파랑 표시";
-    blueToggleLabel.append(blueToggleInput, blueToggleText);
-    els.transitionFilter.append(blueToggleLabel);
   }
 
   function renderArrowChart() {
@@ -260,37 +285,6 @@
     const allSeries = participants.map(arrowSeries).filter((s) => s.length);
     const allAverageSeries = averageArrowSeries();
     const averageSeries = filteredTransitionSeries(allAverageSeries);
-    const averageBounds = allAverageSeries.flatMap((point) => [point.rt - point.rtSd, point.rt, point.rt + point.rtSd]);
-    const [xMin, xMax] = extent([...allSeries.flatMap((s) => s.map((p) => p.rt)), ...averageBounds], [0, 8], .1);
-    const yMin = 0;
-    const scales = drawAxes(els.arrowChart, {
-      width, height, left: 78, right: 36, top: 30, bottom: 62,
-      xMin, xMax, yMin, yMax: 1,
-      xTicks: Array.from({ length: 6 }, (_, i) => ({ value: xMin + (xMax - xMin) * i / 5, label: (xMin + (xMax - xMin) * i / 5).toFixed(1) })),
-      yTicks: 5, xLabel: "RT", yLabel: "정답률", yFormat: (v) => `${Math.round(v * 100)}%`,
-    });
-    const roundLabelBoxes = [];
-    const roundLabelOffsets = [[10, -10], [10, 20], [-30, -10], [-30, 20], [18, 4], [-38, 4], [-8, -24], [-8, 32], [28, -20], [-44, -20]];
-    function appendRoundLabel(label, className, baseX, baseY) {
-      const w = Math.max(24, label.length * 8 + 10);
-      const h = 18;
-      const bounds = { left: 82, right: width - 18, top: 24, bottom: height - 48 };
-      const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-      let chosen = null;
-      for (const [dx, dy] of roundLabelOffsets) {
-        const x = Math.min(Math.max(baseX + dx, bounds.left), bounds.right - w);
-        const y = Math.min(Math.max(baseY + dy, bounds.top + h), bounds.bottom);
-        const box = { x: x - 4, y: y - h + 3, w, h };
-        if (!roundLabelBoxes.some((placed) => overlaps(box, placed))) {
-          chosen = { x, y, box };
-          break;
-        }
-        if (!chosen) chosen = { x, y, box };
-      }
-      roundLabelBoxes.push(chosen.box);
-      els.arrowChart.append(textNode(label, { class: className, x: chosen.x, y: chosen.y }));
-    }
-
     const participantEntries = participants.map((participant) => {
       const fullSeries = arrowSeries(participant);
       return {
@@ -300,6 +294,42 @@
         selectedSeries: filteredTransitionSeries(fullSeries),
       };
     }).filter((entry) => entry.fullSeries.length);
+    const averageBounds = allAverageSeries.flatMap((point) => [point.rt - point.rtSd, point.rt, point.rt + point.rtSd]);
+    const selectedSeries = participantEntries.filter((entry) => entry.highlighted).flatMap((entry) => entry.selectedSeries);
+    const zoomAverageBounds = isAverageSelected() ? averageSeries.flatMap((point) => [point.rt - point.rtSd, point.rt, point.rt + point.rtSd]) : [];
+    const zoomRtValues = [...selectedSeries.map((point) => point.rt), ...zoomAverageBounds];
+    const zoomAccuracyValues = [
+      ...selectedSeries.map((point) => point.accuracy),
+      ...(isAverageSelected() ? averageSeries.flatMap((point) => [point.accuracy - point.accuracySd, point.accuracy, point.accuracy + point.accuracySd]) : []),
+    ];
+    const canZoom = zoomToSelection && zoomRtValues.length;
+    const [xMin, xMax] = canZoom
+      ? boundedExtent(zoomRtValues, [0, 8], .22, 0, Infinity, .45)
+      : extent([...allSeries.flatMap((s) => s.map((p) => p.rt)), ...averageBounds], [0, 8], .1);
+    const [yMin, yMax] = canZoom
+      ? boundedExtent(zoomAccuracyValues, [0, 1], .24, 0, 1, .08)
+      : [0, 1];
+    const scales = drawAxes(els.arrowChart, {
+      width, height, left: 78, right: 36, top: 30, bottom: 62,
+      xMin, xMax, yMin, yMax,
+      xTicks: Array.from({ length: 6 }, (_, i) => ({ value: xMin + (xMax - xMin) * i / 5, label: (xMin + (xMax - xMin) * i / 5).toFixed(1) })),
+      yTicks: 5, xLabel: "RT", yLabel: "정답률", yFormat: (v) => `${Math.round(v * 100)}%`,
+    });
+    const pendingRoundLabels = [];
+    function appendRoundLabel(label, className, baseX, baseY) {
+      const bounds = { left: 84, right: width - 20, top: 32, bottom: height - 52 };
+      const x = Math.min(Math.max(baseX, bounds.left), bounds.right);
+      const dy = baseY < bounds.top + 18 ? 12 : -12;
+      const y = Math.min(Math.max(baseY + dy, bounds.top), bounds.bottom);
+      pendingRoundLabels.push({ label, className, x, y });
+    }
+    function renderRoundLabels() {
+      pendingRoundLabels.forEach(({ label, className, x, y }) => {
+        const group = makeSvg("g", { class: "round-label-group" });
+        group.append(textNode(label, { class: className, x, y, "text-anchor": "middle" }));
+        els.arrowChart.append(group);
+      });
+    }
 
     function drawParticipantTrajectory({ participant, highlighted, series }) {
       if (!series.length) return;
@@ -309,7 +339,7 @@
           class: "arrow-segment",
           d: `M${scales.x(start.rt).toFixed(1)},${scales.y(start.accuracy).toFixed(1)} L${scales.x(end.rt).toFixed(1)},${scales.y(end.accuracy).toFixed(1)}`,
           stroke: highlighted ? colors.red : colors.blue,
-          "stroke-width": highlighted ? (compactSelectedTrajectory ? 1.9 : 2.8) : 1.15,
+          "stroke-width": highlighted ? (compactSelectedTrajectory ? 1.25 : 1.8) : 1.15,
           "stroke-opacity": highlighted ? .98 : .18,
         });
         segment.addEventListener("click", () => selectOnly(participant.id));
@@ -317,15 +347,14 @@
         els.arrowChart.append(segment);
       }
       series.forEach((point) => {
-        const dot = makeSvg("circle", { class: "arrow-dot", cx: scales.x(point.rt), cy: scales.y(point.accuracy), r: highlighted ? (compactSelectedTrajectory ? 3.6 : 5.4) : 3, fill: highlighted ? colors.red : colors.blue, "fill-opacity": highlighted ? .98 : .34 });
+        const dot = makeSvg("circle", { class: "arrow-dot", cx: scales.x(point.rt), cy: scales.y(point.accuracy), r: highlighted ? (compactSelectedTrajectory ? 3.2 : 4.6) : 3, fill: highlighted ? colors.red : colors.blue, "fill-opacity": highlighted ? .98 : .34 });
         dot.addEventListener("click", () => selectOnly(participant.id));
         dot.append(makeSvg("title")); dot.firstChild.textContent = `${participant.nickname} ${point.label}: RT ${formatNumber(point.rt, 3)}초 · ${formatPercent(point.accuracy)}`;
         els.arrowChart.append(dot);
-        if (highlighted && !compactSelectedTrajectory) appendRoundLabel(`R${point.round}`, "round-label", scales.x(point.rt), scales.y(point.accuracy));
+        if (highlighted && !compactSelectedTrajectory) appendRoundLabel(String(point.round), "round-label", scales.x(point.rt), scales.y(point.accuracy));
       });
     }
 
-    if (showAllTrajectories) participantEntries.forEach((entry) => drawParticipantTrajectory({ participant: entry.participant, highlighted: false, series: entry.selectedSeries }));
     if (isAverageSelected() && averageSeries.length) {
       if (!compactSelectedTrajectory) {
         averageSeries.forEach((point) => {
@@ -371,10 +400,11 @@
         dot.append(makeSvg("title"));
         dot.firstChild.textContent = `${point.label}: RT ${formatNumber(point.rt, 3)}초 · ${formatPercent(point.accuracy)} · n=${point.n}`;
         els.arrowChart.append(dot);
-        if (!compactSelectedTrajectory) appendRoundLabel(`R${point.round}`, "round-label average-label", scales.x(point.rt), scales.y(point.accuracy));
+        if (!compactSelectedTrajectory) appendRoundLabel(String(point.round), "round-label average-label", scales.x(point.rt), scales.y(point.accuracy));
       });
     }
     participantEntries.filter((entry) => entry.highlighted).forEach((entry) => drawParticipantTrajectory({ participant: entry.participant, highlighted: true, series: entry.selectedSeries }));
+    renderRoundLabels();
   }
 
   function renderOverview(svg, metric) {
@@ -383,12 +413,12 @@
     const values = participants.flatMap((p) => metricSeries(p, metric).map((point) => point.value));
     const [rawMin, rawMax] = metric === "accuracy" ? [0, 1] : extent(values, [0, 8]);
     const xMax = Math.max(1, maxAttempts);
-    const scales = drawAxes(svg, { width, height, left: 66, right: 24, top: 24, bottom: 50, xMin: 1, xMax, yMin: rawMin, yMax: rawMax, xTicks: Array.from({ length: xMax }, (_, i) => ({ value: i + 1, label: `R${i + 1}` })), yTicks: 4, xLabel: "차수", yLabel: metric === "rt" ? "RT" : "정답률", yFormat: metric === "accuracy" ? (v) => `${Math.round(v * 100)}%` : (v) => v.toFixed(1) });
+    const scales = drawAxes(svg, { width, height, left: 66, right: 24, top: 24, bottom: 50, xMin: 1, xMax, yMin: rawMin, yMax: rawMax, xTicks: Array.from({ length: xMax }, (_, i) => ({ value: i + 1, label: String(i + 1) })), yTicks: 4, xLabel: "차수", yLabel: metric === "rt" ? "RT" : "정답률", yFormat: metric === "accuracy" ? (v) => `${Math.round(v * 100)}%` : (v) => v.toFixed(1) });
     participants.forEach((participant) => {
       const series = metricSeries(participant, metric);
       if (!series.length) return;
       const highlighted = selected.has(participant.id);
-      if (series.length >= 2) svg.append(makeSvg("path", { class: "series-line", d: series.map((p, i) => `${i ? "L" : "M"}${scales.x(p.round).toFixed(1)},${scales.y(p.value).toFixed(1)}`).join(" "), stroke: highlighted ? colors.red : colors.paleBlue, "stroke-width": highlighted ? 2.3 : 1.1, "stroke-opacity": highlighted ? .96 : .78 }));
+      if (series.length >= 2) svg.append(makeSvg("path", { class: "series-line", d: series.map((p, i) => `${i ? "L" : "M"}${scales.x(p.round).toFixed(1)},${scales.y(p.value).toFixed(1)}`).join(" "), stroke: highlighted ? colors.red : colors.paleBlue, "stroke-width": highlighted ? 1.7 : 1.1, "stroke-opacity": highlighted ? .96 : .78 }));
       series.forEach((point) => {
         const dot = makeSvg("circle", { cx: scales.x(point.round), cy: scales.y(point.value), r: highlighted ? 4.2 : 2.4, fill: highlighted ? colors.red : colors.blue, "fill-opacity": highlighted ? .96 : .35 });
         dot.addEventListener("click", () => selectOnly(participant.id));
@@ -396,49 +426,6 @@
       });
     });
   }
-  function renderDistributionBars(target, distribution, options = {}) {
-    if (!target) return;
-    target.textContent = "";
-    const items = distribution?.items || [];
-    const total = distribution?.total || 0;
-    if (!items.length || distribution?.unavailable) {
-      const empty = document.createElement("p");
-      empty.className = "empty-state demographic-empty";
-      empty.textContent = options.unavailableText || "수집된 데이터 없음";
-      target.append(empty);
-      return;
-    }
-    items.forEach((item, index) => {
-      const row = document.createElement("div");
-      row.className = "bar-row demographic-row";
-      const label = document.createElement("span");
-      label.className = "bar-label";
-      label.textContent = item.label;
-      const track = document.createElement("span");
-      track.className = "bar-track";
-      const fill = document.createElement("span");
-      fill.className = `bar-fill ${options.tone || (index % 3 === 1 ? "green" : index % 3 === 2 ? "amber" : "")}`.trim();
-      fill.style.width = `${Math.max(0, Math.min(100, (item.ratio || 0) * 100))}%`;
-      track.append(fill);
-      const value = document.createElement("strong");
-      value.className = "bar-value";
-      value.textContent = `${item.count}명 · ${formatPercent(item.ratio)}`;
-      row.title = `${item.label}: ${item.count}/${total}명 (${formatPercent(item.ratio)})`;
-      row.append(label, track, value);
-      target.append(row);
-    });
-  }
-  function renderDemographics() {
-    const demographics = data.demographics || {};
-    const n = demographics.participantCount || participants.length;
-    if (els.demographicSummary) {
-      els.demographicSummary.textContent = `${n}명 기준 · 성별은 원자료에 컬럼이 없어 계산 불가`;
-    }
-    renderDistributionBars(els.handednessBars, demographics.dominantHand);
-    renderDistributionBars(els.ageBars, demographics.age, { tone: "green" });
-    renderDistributionBars(els.genderBars, demographics.gender, { unavailableText: "성별 컬럼 없음" });
-  }
-
   function renderNameList() {
     const visible = visibleParticipants();
     els.nameList.textContent = "";
@@ -461,8 +448,10 @@
     visible.forEach((participant) => {
       const item = document.createElement("label");
       item.className = `name-item${selected.has(participant.id) ? " is-selected" : ""}`;
-      const input = document.createElement("input"); input.type = "checkbox"; input.checked = selected.has(participant.id);
-      input.addEventListener("change", () => { input.checked ? selected.add(participant.id) : selected.delete(participant.id); renderAll(); });
+      const input = document.createElement("input"); input.type = "radio"; input.name = "participantSelection"; input.checked = selected.has(participant.id);
+      input.addEventListener("change", () => {
+        if (input.checked) selectOnly(participant.id);
+      });
       const text = document.createElement("span");
       const primary = document.createElement("span"); primary.className = "name-primary"; primary.textContent = participant.nickname;
       const secondary = document.createElement("span"); secondary.className = "name-secondary"; secondary.textContent = `${Object.keys(participant.rounds || {}).length}회 · ${participantIdSourceLabel(participant.idSource)}`;
@@ -471,24 +460,40 @@
   }
   function renderStats() {
     const chosen = participants.filter((p) => selected.has(p.id));
-    const averageSelected = isAverageSelected();
     const cohort = chosen.length ? chosen : participants;
     const roundCounts = cohort.map((p) => Object.keys(p.rounds || {}).length);
     const roundMetrics = cohort.flatMap((p) => Object.values(p.rounds || {}));
     const rts = roundMetrics.map((r) => r.rtMean).filter(Number.isFinite);
     const accs = roundMetrics.map((r) => r.accuracy).filter(Number.isFinite);
-    els.selectedPeople.textContent = chosen.length ? `${chosen.length}명${averageSelected ? " + 평균" : ""}` : (averageSelected ? "평균" : "전체");
     els.selectedRounds.textContent = formatNumber(roundCounts.reduce((a, b) => a + b, 0) / roundCounts.length, 2);
     els.selectedRt.textContent = `${formatNumber(rts.reduce((a, b) => a + b, 0) / rts.length, 2)}s`;
     els.selectedAcc.textContent = formatPercent(accs.reduce((a, b) => a + b, 0) / accs.length);
-    const personSelectionCount = Array.from(selected).filter((id) => id !== AVERAGE_ID).length;
-    els.selectionCount.textContent = `${personSelectionCount}명${averageSelected ? " + 평균" : ""} 선택`;
   }
-  function renderAll() { renderNameList(); renderTransitionFilter(); renderArrowChart(); renderOverview(els.rtOverviewChart, "rt"); renderOverview(els.accuracyOverviewChart, "accuracy"); renderStats(); renderDemographics(); }
+  function renderZoomControl() {
+    if (!els.zoomToSelection) return;
+    const selectedCount = Array.from(selected).filter((id) => id !== AVERAGE_ID).length + (isAverageSelected() ? 1 : 0);
+    if (selectedCount === 0) zoomToSelection = false;
+    els.zoomToSelection.disabled = selectedCount === 0;
+    els.zoomToSelection.setAttribute("aria-pressed", zoomToSelection ? "true" : "false");
+    els.zoomToSelection.textContent = zoomToSelection ? "전체 보기" : "확대";
+    els.zoomToSelection.title = selectedCount ? "선택된 항목이 잘 보이도록 축 범위를 조정" : "확대할 참가자나 평균을 체크하세요";
+  }
+  function renderAll() { renderNameList(); renderTransitionFilter(); renderZoomControl(); renderArrowChart(); renderOverview(els.rtOverviewChart, "rt"); renderOverview(els.accuracyOverviewChart, "accuracy"); renderStats(); }
 
   els.datasetSummary.textContent = `${participants.length}명 · ${data.quality?.selectedTrialCount || 0} trials · 공통 ${data.itemCatalog?.commonItems?.length || 0} · 제외 ${data.quality?.ignoredNonComparableTrialCount || 0}`;
   els.nameSearch.addEventListener("input", renderNameList);
-  els.clearSelection.addEventListener("click", () => { selected.clear(); renderAll(); });
-  els.selectVisible.addEventListener("click", () => { visibleParticipants().forEach((p) => selected.add(p.id)); renderAll(); });
+  els.clearSelection.addEventListener("click", () => { selected.clear(); zoomToSelection = false; renderAll(); emitParticipantSelection(); });
+  els.zoomToSelection?.addEventListener("click", () => { zoomToSelection = !zoomToSelection; renderAll(); });
+  els.selectVisible.addEventListener("click", () => {
+    const match = visibleParticipants()[0];
+    if (match) selectOnly(match.id);
+  });
+  window.addEventListener("svt:participant-select", (event) => {
+    const id = event.detail?.id;
+    if (participants.some((participant) => participant.id === id)) selectOnly(id, false);
+  });
+  const initialParticipantId = defaultParticipantId();
+  if (initialParticipantId) selected.add(initialParticipantId);
   renderAll();
+  emitParticipantSelection();
 })();

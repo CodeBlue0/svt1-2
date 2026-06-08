@@ -1,7 +1,10 @@
 # SVT Experiment Dashboard
 
-Static 3-page dashboard for 7-round SVT experiment latency, accuracy, individual
-trend/model-fit, confusion-matrix, item-correctness, and cohort insight analysis. Analyses use only items shared across all rounds; 1st-round-only items are ignored.
+Static 3-page dashboard for SVT experiment latency, accuracy, individual
+trend/model-fit, confusion-matrix, item-correctness, and cohort insight analysis.
+Participant rounds are assigned by each participant's selected submission
+timestamps, not by source folder names. Analyses use only items shared across
+observed attempts; first-attempt-only items are ignored.
 
 ## Public Files
 
@@ -12,16 +15,18 @@ trend/model-fit, confusion-matrix, item-correctness, and cohort insight analysis
 - `web/data.js`: generated public payload.
 
 `web/data.js` is a generated, privacy-aware payload. The public participant
-selector uses participant-entered `participant_id` values first (for example,
-`applebanana`). If a usable participant ID is missing, the generator falls back
-to the numeric student ID so nicknameless participants remain recognizable.
+selector uses the most recent selected submission's participant-entered
+`participant_id` first (for example, `applebanana`). If a usable participant ID
+is missing, the generator falls back to the numeric student ID so nicknameless
+participants remain recognizable.
 Participants with only one completed round are excluded from the public
 dashboard.
 Names, source file paths, duplicate details, and full audit logs are written
 under ignored `metadata/` files and are not part of the public dashboard payload.
 
 Raw files under `extracted/` are read-only inputs; the analysis script never
-edits them.
+edits them. `extracted/svt_s1/` is temporarily excluded from the generated
+metrics and public dashboard payload.
 
 ## Regenerate Data
 
@@ -38,7 +43,9 @@ The generator writes:
 - private/local audit outputs: `metadata/svt_*.csv`,
   `metadata/svt_quality_summary.json`
 
-Run the fixture checks for round assignment, duplicate selection, identity merging, common-item filtering, model fallback, and payload redaction:
+Run the fixture checks for source-bucket assignment, exact-copy deduplication,
+chronological attempt assignment, identity merging, common-item filtering, model
+fallback, and payload redaction:
 
 ```bash
 python3 scripts/test_compute_svt_metrics.py

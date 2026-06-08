@@ -3,10 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SVT Insight Atlas</title>
+    <title>SVT Group Analysis</title>
     <link rel="stylesheet" href="styles.css" />
-    <meta http-equiv="refresh" content="0; url=index.html" />
-    <script>window.location.replace("index.html");</script>
   </head>
   <body>
     <main class="site-shell insights-page">
@@ -14,89 +12,19 @@
         <nav class="top-nav" aria-label="SVT dashboard pages">
           <a class="brand" href="index.html">SVT Studio</a>
           <div class="nav-links">
-            <a class="nav-link" href="index.html">비교</a>
-            <a class="nav-link" href="items.html">개인 분석</a>
-            <a class="nav-link active" href="insights.html">인사이트</a>
+            <a class="nav-link" href="index.html">개인 분석</a>
+            <a class="nav-link active" href="insights.html">그룹별 분석</a>
           </div>
         </nav>
         <section class="hero-grid">
           <div>
-            <p class="eyebrow">page 3 · cohort insight</p>
-            <h1>인사이트</h1>
-            <p id="insightSummary" class="summary-text">전체 요약</p>
-          </div>
-          <div class="control-card insight-note">
-            <span class="pill-label">creative view</span>
-            <strong>전체 흐름</strong>
-            <p>제출과 문항 요약</p>
+            <p class="eyebrow">cohort insight</p>
+            <h1>그룹별 분석</h1>
           </div>
         </section>
       </header>
 
-      <section class="dashboard-panel">
-        <section class="metric-strip insight-stats" aria-label="요약">
-          <article class="stat-card"><span>참가자</span><strong id="cohortParticipants">-</strong></article>
-          <article class="stat-card"><span>차수</span><strong id="avgRounds">-</strong></article>
-          <article class="stat-card"><span>완료율</span><strong id="completeRate">-</strong></article>
-          <article class="stat-card"><span>trials</span><strong id="trialCount">-</strong></article>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">participation funnel</p>
-              <h2>수행 횟수</h2>
-              <p class="summary-text">중복 제거 기준</p>
-            </div>
-          </div>
-          <div id="attendanceBars" class="insight-bars"></div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">round landscape</p>
-              <h2>회차별 균형</h2>
-            </div>
-          </div>
-          <div id="roundInsightList" class="round-card-grid"></div>
-        </section>
-
-        <section class="panel-section feature-panel">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">speed × accuracy atlas</p>
-              <h2>속도-정확도</h2>
-              <p class="summary-text">점=참가자</p>
-            </div>
-          </div>
-          <svg id="speedAccuracyChart" class="chart hero-chart" viewBox="0 0 1040 500" role="img" aria-label="RT 정답률 산점도"></svg>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">item difficulty radar</p>
-              <h2>유형별 난이도</h2>
-              <p class="summary-text">공통 문항 기준</p>
-            </div>
-          </div>
-          <div id="categoryInsightList" class="category-insights"></div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-heading compact">
-            <div>
-              <p class="eyebrow">watch list</p>
-              <h2>어려운 문항</h2>
-              <p class="summary-text">정답률 낮은 순</p>
-            </div>
-          </div>
-          <div id="riskList" class="risk-list"></div>
-        </section>
-      </section>
+      <section class="dashboard-panel group-analysis-panel"></section>
     </main>
-    <script src="data.js"></script>
-    <script src="insights.js"></script>
   </body>
 </html>

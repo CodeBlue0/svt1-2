@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import math
@@ -40,6 +41,7 @@ ROUND_DIRS = {
     "SVT_6_525": 6,
     "SVT_7_527": 7,
 }
+EXCLUDED_SOURCE_DIRS = {"svt_s1"}
 ROUND_LABELS = {round_number: f"svt_{round_number}" for round_number in range(1, 8)}
 ROUND_FALLBACK_DATES = {
     1: "2026-05-06",
@@ -64,16 +66,13 @@ LATE_DIR_MARKERS = ("늦은제출", "늦음제출")
 NAME_RE = re.compile(r"^(?P<name>.*?)(?P<short_id>\d{6})_(?P<upload_id>\d+)_(?P<record_id>\d+)_")
 DATE_RE = re.compile(r"(?P<date>20\d{2}-\d{2}-\d{2})(?:[_T](?P<hour>\d{2})h?(?P<minute>\d{2})?[.:]?(?P<second>\d{2})?)?")
 VALID_RESPONSE = {"O", "X"}
-REPRESENTATIVE_FILE_OVERRIDES = {
-    # 강필중 SVT 1 has two complete submissions. Use the first attempt because
-    # the analysis should reflect the lower original S1 accuracy for this
-    # participant only, rather than the default "later duplicate wins" rule.
-    ("participant_id:applebanana", 1, "cst"): "extracted/svt_s1/강필중202135_64122_5063969_PARTICIPANT_cst_2026-05-06_11h00.58.059.csv",
-}
-
 
 def nfc(value: object) -> str:
     return unicodedata.normalize("NFC", str(value or "")).strip()
+
+
+def attempt_label(attempt_number: int | None) -> str:
+    return f"attempt_{attempt_number}" if attempt_number else ""
 
 
 def decode_bytes(data: bytes) -> tuple[str | None, str, str]:
@@ -355,7 +354,10 @@ class FileRecord:
     short_id: str = ""
     round_number: int | None = None
     round_label: str = ""
+    source_round_number: int | None = None
+    source_round_label: str = ""
     assignment_rule: str = ""
+    content_hash: str = ""
     file_datetime: datetime | None = None
     valid_trials: int = 0
     selected: bool = False
@@ -406,6 +408,8 @@ class CandidateSource:
 def discover_round_anchors() -> dict[int, datetime]:
     dates: dict[int, list[datetime]] = defaultdict(list)
     for dir_name, round_number in ROUND_DIRS.items():
+        if nfc(dir_name).casefold() in EXCLUDED_SOURCE_DIRS:
+            continue
         phase_dir = EXTRACTED_DIR / dir_name
         for path in phase_dir.glob("*.csv"):
             parsed = parse_datetime_from_text(nfc(path.name))
@@ -418,6 +422,18 @@ def discover_round_anchors() -> dict[int, datetime]:
     for round_number, date in ROUND_FALLBACK_DATES.items():
         anchors.setdefault(round_number, datetime.strptime(date, "%Y-%m-%d"))
     return anchors
+
+
+def is_excluded_source_path(path: Path) -> bool:
+    try:
+        first_part = path.relative_to(EXTRACTED_DIR).parts[0]
+    except (IndexError, ValueError):
+        return False
+    return nfc(first_part).casefold() in EXCLUDED_SOURCE_DIRS
+
+
+def is_excluded_archive(path: Path) -> bool:
+    return nfc(path.stem).casefold() in EXCLUDED_SOURCE_DIRS
 
 
 def assign_round(path: Path | CandidateSource, first_row_datetime: datetime | None, anchors: dict[int, datetime]) -> tuple[int | None, str, datetime | None]:
@@ -527,6 +543,10 @@ def iter_candidate_files() -> list[CandidateSource]:
     sources: list[CandidateSource] = []
     extracted_round_dirs = {name for name in ZIP_EXTRACTED_DIRS.values() if (EXTRACTED_DIR / name).is_dir()}
     for path in sorted(candidate for candidate in EXTRACTED_DIR.rglob("*") if candidate.is_file()):
+        if is_excluded_source_path(path):
+            continue
+        if path.suffix.lower() == ".zip" and is_excluded_archive(path):
+            continue
         if path.suffix.lower() == ".zip" and path.name in ZIP_ROUNDS:
             if ZIP_EXTRACTED_DIRS[path.name] in extracted_round_dirs:
                 continue
@@ -547,6 +567,10 @@ def read_trials(path: Path | CandidateSource, anchors: dict[int, datetime]) -> t
     source = path if isinstance(path, CandidateSource) else CandidateSource.from_path(path)
     record_path = source.path or Path(source.rel_path)
     record = FileRecord(path=record_path, rel_path=source.rel_path, status="excluded")
+    try:
+        record.content_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        record.content_hash = ""
     text, encoding, decode_warning = source_to_csv_text(source)
     record.encoding = encoding
     if text is None:
@@ -570,6 +594,8 @@ def read_trials(path: Path | CandidateSource, anchors: dict[int, datetime]) -> t
     round_number, assignment_rule, file_dt = assign_round(path, first_row_datetime, anchors)
     record.round_number = round_number
     record.round_label = ROUND_LABELS.get(round_number or 0, "")
+    record.source_round_number = round_number
+    record.source_round_label = ROUND_LABELS.get(round_number or 0, "")
     record.assignment_rule = assignment_rule
     record.file_datetime = file_dt
     if round_number is None:
@@ -643,25 +669,20 @@ def read_trials(path: Path | CandidateSource, anchors: dict[int, datetime]) -> t
 
 
 def choose_representative_files(records: list[FileRecord], trials_by_file: dict[str, list[Trial]]) -> tuple[list[Trial], list[dict[str, str]]]:
-    groups: dict[tuple[str, int, str], list[FileRecord]] = defaultdict(list)
+    groups: dict[tuple[str, str, str], list[FileRecord]] = defaultdict(list)
     for record in records:
         if record.status == "candidate" and record.round_number is not None:
-            groups[(record.identity_key, record.round_number, record.task)].append(record)
+            content_key = record.content_hash or record.rel_path
+            groups[(record.identity_key, record.task, content_key)].append(record)
 
     selected_trials: list[Trial] = []
     duplicate_rows: list[dict[str, str]] = []
     for key, candidates in groups.items():
-        def sort_key(record: FileRecord) -> tuple[int, datetime, str]:
-            return (record.valid_trials, record.file_datetime or datetime.min, record.rel_path)
+        def sort_key(record: FileRecord) -> tuple[bool, int, datetime, str]:
+            return (bool(record.name_from_filename), record.valid_trials, record.file_datetime or datetime.min, record.rel_path)
 
-        override_path = REPRESENTATIVE_FILE_OVERRIDES.get(key)
-        override_winner = next((record for record in candidates if record.rel_path == override_path), None)
-        winner = override_winner or max(candidates, key=sort_key)
-        duplicate_reason = (
-            "same identity/round/task; representative manually overridden for participant-specific first-attempt S1 accuracy"
-            if override_winner
-            else "same identity/round/task; representative chosen by valid trial count then later file date"
-        )
+        winner = max(candidates, key=sort_key)
+        duplicate_reason = "same identity/task/content hash; exact duplicate copy"
         winner.status = "selected"
         winner.selected = True
         for trial in trials_by_file[winner.rel_path]:
@@ -679,8 +700,10 @@ def choose_representative_files(records: list[FileRecord], trials_by_file: dict[
             duplicate_rows.append(
                 {
                     "identity_key": key[0],
-                    "round_number": str(key[1]),
-                    "task": key[2],
+                    "round_number": str(record.round_number or ""),
+                    "source_round_number": str(record.source_round_number or ""),
+                    "task": key[1],
+                    "content_hash": key[2],
                     "duplicate_file": record.rel_path,
                     "selected_file": winner.rel_path,
                     "duplicate_valid_trials": str(record.valid_trials),
@@ -689,6 +712,29 @@ def choose_representative_files(records: list[FileRecord], trials_by_file: dict[
                 }
             )
     return selected_trials, duplicate_rows
+
+
+def assign_chronological_attempts(records: list[FileRecord], trials_by_file: dict[str, list[Trial]]) -> None:
+    """Treat each selected submission file as one experiment attempt.
+
+    Source folders such as svt4/SVT_5_520 are collection buckets, not the
+    participant's actual attempt number. After exact-copy deduplication, each
+    participant's selected files are ordered by submission time and relabeled as
+    attempt_1, attempt_2, ... for all downstream metrics and dashboard views.
+    """
+    by_identity: dict[str, list[FileRecord]] = defaultdict(list)
+    for record in records:
+        if record.status == "selected":
+            by_identity[record.identity_key].append(record)
+
+    for selected_records in by_identity.values():
+        ordered = sorted(selected_records, key=lambda record: (record.file_datetime or datetime.min, record.rel_path))
+        for attempt_number, record in enumerate(ordered, start=1):
+            record.round_number = attempt_number
+            record.round_label = attempt_label(attempt_number)
+            for trial in trials_by_file.get(record.rel_path, []):
+                trial.round_number = attempt_number
+                trial.round_label = attempt_label(attempt_number)
 
 
 def apply_sd3(trials: list[Trial]) -> int:
@@ -733,6 +779,19 @@ def most_common_value(values: list[str]) -> str:
     for value in clean:
         counts[value] += 1
     return sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+
+
+def latest_usable_participant_id(trials: list[Trial]) -> str:
+    candidates: list[tuple[datetime, int, int, str, str]] = []
+    for trial in trials:
+        participant_id = usable_text_participant_id(trial.participant_id)
+        if not participant_id:
+            continue
+        when = trial.file_datetime or trial.row_datetime or datetime.min
+        candidates.append((when, trial.round_number, trial.trial_index, trial.source_file, participant_id))
+    if not candidates:
+        return ""
+    return max(candidates)[-1]
 
 
 def normalize_hand(value: str) -> str:
@@ -956,9 +1015,10 @@ def comparable_stimulus_ids(trials: list[Trial]) -> tuple[set[str], set[str]]:
     for trial in trials:
         if trial.task == "cst" and trial.stimulus_id:
             by_round[trial.round_number].add(trial.stimulus_id)
-    round_sets = [by_round.get(round_number, set()) for round_number in sorted(ROUND_LABELS)]
+    observed_rounds = sorted(by_round)
+    round_sets = [by_round.get(round_number, set()) for round_number in observed_rounds]
     common_ids = set.intersection(*round_sets) if all(round_sets) else set()
-    comparison_rounds = [round_number for round_number in sorted(ROUND_LABELS) if round_number != 1]
+    comparison_rounds = [round_number for round_number in observed_rounds if round_number != 1]
     round1_only_ids = by_round.get(1, set()) - set().union(*(by_round.get(round_number, set()) for round_number in comparison_rounds))
     return common_ids, round1_only_ids
 
@@ -972,7 +1032,8 @@ def build_item_catalog(trials: list[Trial]) -> dict[str, Any]:
         by_round[trial.round_number][trial.stimulus_id] = trial.item_category
         if trial.statement and trial.stimulus_id not in statements:
             statements[trial.stimulus_id] = trial.statement
-    round_sets = [set(by_round.get(round_number, {})) for round_number in sorted(ROUND_LABELS)]
+    observed_rounds = sorted(by_round)
+    round_sets = [set(by_round.get(round_number, {})) for round_number in observed_rounds]
     common_ids = set.intersection(*round_sets) if all(round_sets) else set()
     def item_payload(stimulus_id: str) -> dict[str, str]:
         category = next((by_round[round_number][stimulus_id] for round_number in sorted(by_round) if stimulus_id in by_round[round_number]), "")
@@ -987,7 +1048,7 @@ def build_item_catalog(trials: list[Trial]) -> dict[str, Any]:
         "counts": {
             "common": len(common_ids),
             "round1Only": 0,
-            "byRound": {str(round_number): len(by_round.get(round_number, {})) for round_number in sorted(ROUND_LABELS)},
+            "byRound": {str(round_number): len(by_round.get(round_number, {})) for round_number in observed_rounds},
         },
     }
 
@@ -1011,15 +1072,15 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
         sequence = 0
         attempt_index = 0
         round_attempt_meta: dict[int, dict[str, Any]] = {}
-        for round_number in sorted(ROUND_LABELS):
+        for round_number in sorted({t.round_number for t in person_trials}):
             round_trials = [t for t in person_trials if t.round_number == round_number]
             if not round_trials:
                 continue
             attempt_index += 1
             round_dates = [t.file_datetime or t.row_datetime for t in round_trials if t.file_datetime or t.row_datetime]
             round_date = min(round_dates).date().isoformat() if round_dates else ""
-            attempt_label = f"R{attempt_index}"
-            round_attempt_meta[round_number] = {"attemptIndex": attempt_index, "displayLabel": attempt_label, "date": round_date}
+            display_label = f"R{attempt_index}"
+            round_attempt_meta[round_number] = {"attemptIndex": attempt_index, "displayLabel": display_label, "date": round_date}
             correct_values = [t.correct for t in round_trials if t.correct is not None]
             rt_values_raw = [t.rt for t in round_trials if t.rt is not None]
             rt_values = [t.rt for t in round_trials if t.rt is not None]
@@ -1030,9 +1091,9 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
             rounds_payload[str(round_number)] = {
                 "round": round_number,
                 "actualRound": round_number,
-                "label": ROUND_LABELS[round_number],
+                "label": attempt_label(round_number),
                 "attemptIndex": attempt_index,
-                "displayLabel": attempt_label,
+                "displayLabel": display_label,
                 "date": round_date,
                 "accuracy": round_float(accuracy),
                 "rtMean": round_float(rt_mean),
@@ -1052,9 +1113,9 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
                     "identity_key": key,
                     "display_name": display_name(student_ids, participant_ids, names, key),
                     "round_number": round_number,
-                    "round_label": ROUND_LABELS[round_number],
+                    "round_label": attempt_label(round_number),
                     "attempt_index": attempt_index,
-                    "attempt_label": attempt_label,
+                    "attempt_label": display_label,
                     "date": round_date,
                     "trial_count": len(round_trials),
                     "accuracy": round_float(accuracy),
@@ -1136,6 +1197,7 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
                 "studentIds": sorted(student_ids),
                 "shortIds": sorted(short_ids),
                 "participantIds": sorted(participant_ids),
+                "latestParticipantId": latest_usable_participant_id(person_trials),
                 "namesFromFilename": sorted(names),
                 "rounds": rounds_payload,
                 "sequence": sequence_points,
@@ -1158,7 +1220,10 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
                 "identity_key": record.identity_key,
                 "round_number": record.round_number or "",
                 "round_label": record.round_label,
+                "source_round_number": record.source_round_number or "",
+                "source_round_label": record.source_round_label,
                 "assignment_rule": record.assignment_rule,
+                "content_hash": record.content_hash,
                 "file_datetime": record.file_datetime.isoformat() if record.file_datetime else "",
                 "valid_trials": record.valid_trials,
                 "selected": record.selected,
@@ -1168,7 +1233,7 @@ def summarize(trials: list[Trial], records: list[FileRecord], duplicate_rows: li
 
     summary = {
         "generatedAt": datetime.now().isoformat(timespec="seconds"),
-        "rounds": [{"round": number, "label": label} for number, label in ROUND_LABELS.items()],
+        "rounds": [{"round": number, "label": attempt_label(number)} for number in range(1, max((t.round_number for t in trials), default=0) + 1)],
         "itemCatalog": build_item_catalog(trials),
         "participants": participants,
         "demographics": build_demographics(participants),
@@ -1208,6 +1273,11 @@ def safe_public_identifier(value: object) -> str:
 
 
 def public_participant_id(participant: dict[str, Any], index: int, used: set[str]) -> tuple[str, str]:
+    latest_participant_id = (
+        safe_public_identifier(participant.get("latestParticipantId", ""))
+        if usable_text_participant_id(participant.get("latestParticipantId", ""))
+        else ""
+    )
     participant_ids = [
         safe_public_identifier(value)
         for value in participant.get("participantIds", [])
@@ -1218,7 +1288,10 @@ def public_participant_id(participant: dict[str, Any], index: int, used: set[str
         for value in [*participant.get("studentIds", []), *participant.get("shortIds", [])]
         if numeric_student_like_id(value)
     ]
-    if participant_ids:
+    if latest_participant_id:
+        base = latest_participant_id
+        source = "participant_id"
+    elif participant_ids:
         base = participant_ids[0]
         source = "participant_id"
     elif student_ids:
@@ -1242,11 +1315,12 @@ def public_participant_id(participant: dict[str, Any], index: int, used: set[str
 def compact_for_web(summary: dict[str, Any]) -> dict[str, Any]:
     """Return the public static dashboard payload.
 
-    The dashboard is selectable by participant-entered IDs (for example
-    applebanana). When no usable participant_id exists for that internal
-    identity group, the public payload falls back to the numeric student ID so
-    nicknameless participants remain recognizable. Names, source paths, and
-    duplicate details stay in ignored metadata outputs.
+    The dashboard is selectable by the most recent selected submission's
+    participant-entered ID (for example applebanana). When no usable
+    participant_id exists for that internal identity group, the public payload
+    falls back to the numeric student ID so nicknameless participants remain
+    recognizable. Names, source paths, and duplicate details stay in ignored
+    metadata outputs.
     """
     participants = []
     used_public_ids: set[str] = set()
@@ -1341,6 +1415,7 @@ def main() -> None:
             trials_by_file[record.rel_path] = trials
     resolve_identity_links(records, trials_by_file)
     selected_trials, duplicate_rows = choose_representative_files(records, trials_by_file)
+    assign_chronological_attempts(records, trials_by_file)
     common_ids, _round1_only_ids = comparable_stimulus_ids(selected_trials)
     ignored_non_comparable_trials = sum(1 for trial in selected_trials if trial.stimulus_id not in common_ids)
     summary = summarize(selected_trials, records, duplicate_rows, ignored_non_comparable_trials)
