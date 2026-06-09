@@ -193,6 +193,15 @@ def usable_text_participant_id(value: object) -> str:
     return cleaned
 
 
+def usable_text_student_id(value: object) -> str:
+    cleaned = nfc(value)
+    if not cleaned or cleaned.lower() in {"anonymous", "participant"}:
+        return ""
+    if cleaned.isdigit() and len(cleaned) >= 6:
+        return ""
+    return cleaned
+
+
 def numeric_student_like_id(value: object) -> str:
     cleaned = nfc(value)
     return cleaned if cleaned.isdigit() and len(cleaned) >= 6 else ""
@@ -203,12 +212,16 @@ def identity_aliases(student_id: str, participant_id: str, name_from_filename: s
     student_numeric = numeric_student_like_id(student_id)
     participant_numeric = numeric_student_like_id(participant_id)
     participant_text = usable_text_participant_id(participant_id)
+    student_text = usable_text_student_id(student_id)
     if student_numeric:
         aliases.append(f"student_numeric:{student_numeric}")
     if participant_numeric:
         aliases.append(f"student_numeric:{participant_numeric}")
     if participant_text:
         aliases.append(f"participant_text:{participant_text.lower()}")
+    if student_text:
+        aliases.append(f"student_text:{student_text.lower()}")
+        aliases.append(f"filename_name_unique:{student_text}")
     name = nfc(name_from_filename)
     short = nfc(short_id)
     if name and short:
@@ -242,12 +255,15 @@ def canonical_identity_key(aliases: set[str]) -> str:
     participant_texts = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("participant_text:"))
     if participant_texts:
         return f"participant_id:{participant_texts[0]}"
-    student_ids = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_numeric:"))
-    if student_ids:
-        return f"student_id:{student_ids[0]}"
     name_short = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("filename_name_short:"))
     if name_short:
         return f"filename:{name_short[0]}"
+    student_ids = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_numeric:"))
+    if student_ids:
+        return f"student_id:{student_ids[0]}"
+    student_texts = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_text:"))
+    if student_texts:
+        return f"student_text:{student_texts[0]}"
     name_unique = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("filename_name_unique:"))
     if name_unique:
         return f"filename:{name_unique[0]}"
@@ -453,6 +469,9 @@ def assign_round(path: Path | CandidateSource, first_row_datetime: datetime | No
     if any(marker in parent for marker in LATE_DIR_MARKERS) and file_dt:
         nearest_round = min(anchors, key=lambda round_number: (abs((file_dt.date() - anchors[round_number].date()).days), round_number))
         return nearest_round, "late_nearest_date", file_dt
+    if file_dt:
+        nearest_round = min(anchors, key=lambda round_number: (abs((file_dt.date() - anchors[round_number].date()).days), round_number))
+        return nearest_round, "nearest_date", file_dt
     return None, "unassigned", file_dt
 
 
@@ -547,15 +566,18 @@ def iter_candidate_files() -> list[CandidateSource]:
             continue
         if path.suffix.lower() == ".zip" and is_excluded_archive(path):
             continue
-        if path.suffix.lower() == ".zip" and path.name in ZIP_ROUNDS:
-            if ZIP_EXTRACTED_DIRS[path.name] in extracted_round_dirs:
+        if path.suffix.lower() == ".zip":
+            archive_round = ZIP_ROUNDS.get(path.name)
+            if archive_round is not None and ZIP_EXTRACTED_DIRS[path.name] in extracted_round_dirs:
                 continue
             try:
                 with zipfile.ZipFile(path) as archive:
                     for info in archive.infolist():
                         if info.is_dir():
                             continue
-                        sources.append(CandidateSource.from_zip_member(path, info.filename, archive.read(info), ZIP_ROUNDS[path.name]))
+                        if Path(info.filename).suffix.lower() not in {".csv", ".xlsx", ".numbers"}:
+                            continue
+                        sources.append(CandidateSource.from_zip_member(path, info.filename, archive.read(info), archive_round))
             except zipfile.BadZipFile:
                 sources.append(CandidateSource.from_path(path))
             continue

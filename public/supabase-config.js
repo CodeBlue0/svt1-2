@@ -1,0 +1,16 @@
+window.SVT_SUPABASE_CONFIG = {
+  url: "https://mtdxsfqhuvhmiykbyvof.supabase.co",
+  anonKey: "sb_publishable_lm4R95jBQ8zL1pbmxKlGHg_-17NyYN1",
+  participantsTable: "organized_manifest",
+  resultsTable: "svt_experiment_results",
+  filesTable: "organized_manifest",
+  participantIdColumn: "participant",
+  participantDisplayColumn: "participant",
+  fileParticipantColumn: "participant",
+  fileTaskColumn: "task",
+  fileDateColumn: "experiment_date",
+  filePathColumn: "organized_path",
+  fileLoadedAtColumn: "loaded_at",
+  storageBucket: "",
+  publicFileBaseUrl: "",
+};

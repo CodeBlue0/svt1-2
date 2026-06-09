@@ -80,6 +80,42 @@ a { color: inherit; }
   justify-content: space-between;
   gap: 16px;
 }
+.nav-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.dataset-switcher {
+  display: inline-flex;
+  gap: 4px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.68);
+}
+.dataset-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 64px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 900;
+}
+.dataset-option.active {
+  background: var(--ink);
+  color: #fff;
+}
+.dataset-option.disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
 .brand {
   display: inline-flex;
   align-items: center;
@@ -262,6 +298,7 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
 .model-legend .dot-red { width: 9px; height: 9px; border-radius: 999px; background: var(--red); }
 .model-legend .line-blue { width: 24px; height: 4px; border-radius: 999px; }
 .model-legend .line-blue { background: repeating-linear-gradient(90deg, var(--blue) 0 7px, transparent 7px 11px); }
+.model-legend .line-green { width: 24px; height: 4px; border-radius: 999px; background: repeating-linear-gradient(90deg, var(--green) 0 7px, transparent 7px 11px); }
 .model-equations {
   display: grid;
   gap: 4px;
@@ -286,6 +323,12 @@ select.search-input { appearance: none; background-image: linear-gradient(45deg,
   border-color: rgba(37, 99, 235, .16);
 }
 .model-equation.blue strong { color: #1d4ed8; }
+.model-equation.green code {
+  color: #047857;
+  background: #ecfdf5;
+  border-color: rgba(16, 185, 129, .18);
+}
+.model-equation.green strong { color: #047857; }
 .chart {
   display: block;
   width: 100%;

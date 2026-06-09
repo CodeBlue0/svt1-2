@@ -8,11 +8,13 @@
   const CLUSTER_TARGET = 22;
   const MIN_CLUSTER_SIZE = 3;
   const DTW_WINDOW = 1;
+  const MOVING_AVERAGE_WINDOW = 3;
   const palette = ["#ef4444", "#2563eb", "#059669", "#d97706", "#7c3aed", "#0f766e"];
-  let selectedClusterIndex = 0;
+  let selectedClusterIndex = -1;
   let showGroupAverage = true;
   let selectedMemberIds = new Set();
   let clusters = [];
+  let allCluster = null;
 
   const els = {
     clusterSummary: document.getElementById("clusterSummary"),
@@ -47,6 +49,19 @@
   function fmtNum(value, digits = 2) { return Number.isFinite(value) ? value.toFixed(digits) : "-"; }
   function fmtPct(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "-"; }
   function fmtPctPoint(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%p` : "-"; }
+  function fmtAvgCount(value) {
+    if (!Number.isFinite(value)) return "-";
+    return Math.abs(value - Math.round(value)) < 0.05 ? String(Math.round(value)) : value.toFixed(1);
+  }
+  function ceilingAdjustedAccuracy(accuracy, trialCount = 176) {
+    if (!Number.isFinite(accuracy)) return NaN;
+    const n = Number.isFinite(trialCount) && trialCount > 0 ? trialCount : 176;
+    const corrected = Math.min(1 - 1e-6, Math.max(1e-6, ((accuracy * n) + 0.5) / (n + 1)));
+    return Math.log(corrected / (1 - corrected));
+  }
+  function floorAdjustedRt(rt) {
+    return Number.isFinite(rt) ? Math.log(Math.max(0.05, rt)) : NaN;
+  }
   function participantRounds(participant) {
     return Object.values(participant.rounds || {}).sort((a, b) => (a.attemptIndex || a.round) - (b.attemptIndex || b.round));
   }
@@ -84,13 +99,44 @@
     const digits = span < 0.12 ? 1 : 0;
     return `${(value * 100).toFixed(digits)}%`;
   }
-  function rmsScale(values) {
-    const clean = values.filter(Number.isFinite);
-    if (!clean.length) return 1;
-    return Math.sqrt(mean(clean.map((value) => value ** 2))) || 1;
+  function meanAbsoluteChangeScale(values) {
+    const clean = values.filter(Number.isFinite).map(Math.abs).filter((value) => value > 0);
+    return mean(clean) || 1;
+  }
+  function movingAverage(values, windowSize = MOVING_AVERAGE_WINDOW) {
+    const radius = Math.floor(windowSize / 2);
+    return values.map((_, index) => {
+      const from = Math.max(0, index - radius);
+      const to = Math.min(values.length, index + radius + 1);
+      return mean(values.slice(from, to));
+    });
+  }
+  function signedRelativeDistance(a, b) {
+    const epsilon = 0.05;
+    const aMagnitude = Math.log1p(Math.abs(a) / epsilon);
+    const bMagnitude = Math.log1p(Math.abs(b) / epsilon);
+    return Math.abs(aMagnitude - bMagnitude);
+  }
+  function cosineDistance(a, b) {
+    const dot = a.reduce((total, value, index) => total + value * (b[index] || 0), 0);
+    const aNorm = vectorNorm(a);
+    const bNorm = vectorNorm(b);
+    if (!aNorm && !bNorm) return 0;
+    if (!aNorm || !bNorm) return 1;
+    const cosine = Math.max(-1, Math.min(1, dot / (aNorm * bNorm)));
+    return 1 - cosine;
   }
   function pointDistance(a, b) {
-    return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+    const length = Math.max(a.length, b.length);
+    const left = Array.from({ length }, (_, index) => a[index] || 0);
+    const right = Array.from({ length }, (_, index) => b[index] || 0);
+    let magnitudeTotal = 0;
+    for (let index = 0; index < length; index += 1) {
+      magnitudeTotal += signedRelativeDistance(left[index], right[index]) ** 2;
+    }
+    const directionDistance = cosineDistance(left, right);
+    const magnitudeDistance = Math.sqrt(magnitudeTotal);
+    return Math.sqrt((directionDistance * 2.2) ** 2 + (magnitudeDistance * 0.45) ** 2);
   }
   function dtwDistance(a, b, window = DTW_WINDOW) {
     const n = a.length, m = b.length;
@@ -107,11 +153,17 @@
     return dp[n][m] / Math.max(1, n + m);
   }
   function prepareDtwRows(rows) {
-    const rtScale = rmsScale(rows.flatMap((row) => row.changeSequence.map((point) => point.rt)));
-    const accScale = rmsScale(rows.flatMap((row) => row.changeSequence.map((point) => point.acc)));
+    // Normalize by the cohort-wide average absolute change rate for each metric.
+    // Signed means can cancel out near zero, so the scale uses |change rate|.
+    const rtChangeScale = meanAbsoluteChangeScale(rows.flatMap((row) => row.changeSequence.map((point) => point.rtChangeAdjusted)));
+    const accChangeScale = meanAbsoluteChangeScale(rows.flatMap((row) => row.changeSequence.map((point) => point.accChangeAdjusted)));
     return rows.map((row) => ({
       ...row,
-      scaledSequence: row.changeSequence.map((point) => [point.rt / rtScale, point.acc / accScale]),
+      scaledSequence: row.changeSequence.map((point) => [
+        point.rtChangeAdjusted / rtChangeScale,
+        point.accChangeAdjusted / accChangeScale,
+      ]),
+      changeScales: { rt: rtChangeScale, accuracy: accChangeScale },
     }));
   }
   function pairwiseDtwDistances(rows) {
@@ -208,60 +260,161 @@
       y: second.vector[index] * yScale,
     }));
   }
+  function rSquared(points, predict) {
+    const yMean = mean(points.map((point) => point.y));
+    const total = sum(points.map((point) => (point.y - yMean) ** 2));
+    const residual = sum(points.map((point) => (point.y - predict(point.x)) ** 2));
+    return total ? 1 - residual / total : residual < 1e-9 ? 1 : 0;
+  }
+  function linearFit(points) {
+    const n = points.length;
+    const xMean = mean(points.map((point) => point.x));
+    const yMean = mean(points.map((point) => point.y));
+    const denominator = sum(points.map((point) => (point.x - xMean) ** 2));
+    if (!denominator) return null;
+    const slope = sum(points.map((point) => (point.x - xMean) * (point.y - yMean))) / denominator;
+    const intercept = yMean - slope * xMean;
+    return { intercept, slope };
+  }
+  function fitExponentialModel(points, key) {
+    const data = points
+      .map((point) => ({ x: point.round, y: point[key] }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+    if (data.length < 3) return null;
+    const yValues = data.map((point) => point.y);
+    const yMin = Math.min(...yValues), yMax = Math.max(...yValues);
+    const span = yMax - yMin || Math.max(0.001, Math.abs(mean(yValues) || 0) * 0.05);
+    const candidates = new Set();
+    if (key === "rt") candidates.add(0);
+    if (key === "accuracy") candidates.add(1);
+    for (let index = 0; index <= 90; index += 1) {
+      const factor = 10 ** (-2 + index * 3 / 90);
+      const offset = Math.max(span * factor, 1e-6);
+      candidates.add(yMin - offset);
+      candidates.add(yMax + offset);
+    }
+    let best = null;
+    candidates.forEach((c) => {
+      const residuals = data.map((point) => point.y - c);
+      if (residuals.some((value) => !Number.isFinite(value) || Math.abs(value) < 1e-9)) return;
+      const sign = residuals[0] > 0 ? 1 : -1;
+      if (!residuals.every((value) => value * sign > 0)) return;
+      const transformed = data.map((point, index) => ({ x: point.x, y: Math.log(Math.abs(residuals[index])) }));
+      const linear = linearFit(transformed);
+      if (!linear) return;
+      const a = sign * Math.exp(linear.intercept);
+      const b = linear.slope;
+      const predict = (x) => c + a * Math.exp(b * x);
+      const r2 = rSquared(data, predict);
+      if (!Number.isFinite(r2)) return;
+      if (!best || r2 > best.r2) {
+        best = {
+          a,
+          b,
+          c,
+          r2,
+          predict,
+          points: Array.from({ length: 33 }, (_, index) => {
+            const x = 1 + index * (ANALYSIS_ROUNDS - 1) / 32;
+            return { x, y: predict(x) };
+          }).filter((point) => Number.isFinite(point.y)),
+        };
+      }
+    });
+    return best;
+  }
   function analysisRows() {
     const rows = [], excluded = [];
     participants.forEach((participant) => {
       const rounds = participantRounds(participant);
       if (rounds.length < ANALYSIS_ROUNDS) { excluded.push(participant); return; }
       const firstFive = rounds.slice(0, ANALYSIS_ROUNDS);
-      const rtDeltas = [], accDeltas = [];
-      for (let index = 1; index < firstFive.length; index += 1) {
-        rtDeltas.push(firstFive[index].rtMean - firstFive[index - 1].rtMean);
-        accDeltas.push(firstFive[index].accuracy - firstFive[index - 1].accuracy);
-      }
-      const firstRt = firstFive[0].rtMean;
-      const firstAcc = firstFive[0].accuracy;
-      const changeSequence = firstFive.map((round) => ({
-        rt: firstRt - round.rtMean,
-        acc: round.accuracy - firstAcc,
+      const smoothedRt = movingAverage(firstFive.map((round) => round.rtMean));
+      const smoothedAccuracy = movingAverage(firstFive.map((round) => round.accuracy));
+      const movingAverageRounds = firstFive.map((round, index) => ({
+        ...round,
+        rawRtMean: round.rtMean,
+        rawAccuracy: round.accuracy,
+        rtMean: smoothedRt[index],
+        accuracy: smoothedAccuracy[index],
       }));
-      const features = changeSequence.flatMap((point) => [point.rt, point.acc]);
-      if (features.every(Number.isFinite)) rows.push({ participant, rounds: firstFive, rtDeltas, accDeltas, changeSequence, features });
+      const rtDeltas = [], accDeltas = [], changeSequence = [];
+      for (let index = 1; index < movingAverageRounds.length; index += 1) {
+        const rtDelta = movingAverageRounds[index].rtMean - movingAverageRounds[index - 1].rtMean;
+        const accDelta = movingAverageRounds[index].accuracy - movingAverageRounds[index - 1].accuracy;
+        rtDeltas.push(rtDelta);
+        accDeltas.push(accDelta);
+      }
+      movingAverageRounds.forEach((round, index) => {
+        const previous = movingAverageRounds[index - 1];
+        const rtDelta = previous ? round.rtMean - previous.rtMean : 0;
+        const accDelta = previous ? round.accuracy - previous.accuracy : 0;
+        const adjustedRt = floorAdjustedRt(round.rtMean);
+        const previousAdjustedRt = previous ? floorAdjustedRt(previous.rtMean) : adjustedRt;
+        const adjustedAccuracy = ceilingAdjustedAccuracy(round.accuracy, round.trialCount);
+        const previousAdjustedAccuracy = previous ? ceilingAdjustedAccuracy(previous.accuracy, previous.trialCount) : adjustedAccuracy;
+        changeSequence.push({
+          // Positive means faster than the immediately previous attempt.
+          rtChange: -rtDelta,
+          // Log-ratio previous-round RT change, used for distance calculations.
+          rtChangeAdjusted: previousAdjustedRt - adjustedRt,
+          // Positive means more accurate than the immediately previous attempt.
+          accChange: accDelta,
+          // Ceiling-adjusted previous-round accuracy change, used for distance calculations.
+          accChangeAdjusted: adjustedAccuracy - previousAdjustedAccuracy,
+        });
+      });
+      const features = changeSequence.flatMap((point) => [point.rtChange, point.rtChangeAdjusted, point.accChange, point.accChangeAdjusted]);
+      if (features.every(Number.isFinite)) rows.push({ participant, rounds: firstFive, movingAverageRounds, rtDeltas, accDeltas, changeSequence, features });
       else excluded.push(participant);
     });
     return { rows, excluded };
   }
   function describeCluster(members) {
-    const totalRtImprovement = mean(members.map((member) => member.changeSequence.at(-1)?.rt));
-    const totalAccImprovement = mean(members.map((member) => member.changeSequence.at(-1)?.acc));
-    const rtGainFrequency = mean(members.flatMap((member) => member.rtDeltas.map((delta) => delta < 0 ? 1 : 0)));
-    const accGainFrequency = mean(members.flatMap((member) => member.accDeltas.map((delta) => delta > 0 ? 1 : 0)));
-    const volatility = mean(members.flatMap((member) => [...member.rtDeltas.map(Math.abs), ...member.accDeltas.map((value) => Math.abs(value) * 8)]));
-    if (totalRtImprovement > 0.5 && totalAccImprovement > 0.025) return "동반 개선 곡선형";
-    if (totalRtImprovement > 0.5 && totalAccImprovement >= -0.01) return "속도 개선 곡선형";
-    if (totalAccImprovement > 0.025 && totalRtImprovement >= -0.15) return "정확도 개선 곡선형";
-    if (totalRtImprovement > 0.25 && totalAccImprovement < -0.015) return "속도-정확도 교환 곡선형";
-    if (volatility > 0.55 || rtGainFrequency < 0.35 || accGainFrequency < 0.2) return "변동 곡선형";
-    return "안정 곡선형";
+    const rtChanges = members.flatMap((member) => member.changeSequence.map((point) => point.rtChange));
+    const accChanges = members.flatMap((member) => member.changeSequence.map((point) => point.accChange));
+    const avgRtChange = mean(rtChanges);
+    const avgAccChange = mean(accChanges);
+    const rtGainFrequency = mean(rtChanges.map((value) => value > 0.05 ? 1 : 0));
+    const accGainFrequency = mean(accChanges.map((value) => value > 0.01 ? 1 : 0));
+    const rtWorseFrequency = mean(rtChanges.map((value) => value < -0.05 ? 1 : 0));
+    const accDropFrequency = mean(accChanges.map((value) => value < -0.01 ? 1 : 0));
+    const volatility = mean([...rtChanges.map(Math.abs), ...accChanges.map((value) => Math.abs(value) * 8)]);
+    if (rtGainFrequency >= 0.6 && accGainFrequency >= 0.6) return "전환 동반 개선형";
+    if (rtGainFrequency >= 0.6 && accDropFrequency >= 0.45) return "전환 속도-정확도 교환형";
+    if (accGainFrequency >= 0.6 && rtWorseFrequency >= 0.45) return "전환 정확도-속도 교환형";
+    if (rtWorseFrequency >= 0.6 && accDropFrequency >= 0.6) return "전환 동반 하락형";
+    if (avgRtChange > 0.1 && avgAccChange >= -0.005) return "전환 속도 개선형";
+    if (avgAccChange > 0.01 && avgRtChange >= -0.05) return "전환 정확도 개선형";
+    if (avgRtChange > 0.05 && avgAccChange < -0.01) return "전환 속도-정확도 교환형";
+    if (volatility > 0.55) return "전환 변동형";
+    return "전환 혼합형";
+  }
+  function summarizeCluster(cluster, label = null) {
+    const rtMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.rtDeltas[index])));
+    const accMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.accDeltas[index])));
+    const avgRt = mean(rtMeans), avgAcc = mean(accMeans);
+    return { ...cluster, rtMeans, accMeans, avgRt, avgAcc, label: label || describeCluster(cluster.members) };
   }
   function buildClusters(rows, assignments) {
     const raw = Array.from({ length: Math.max(...assignments) + 1 }, (_, index) => ({ index, members: [] }));
     rows.forEach((row, rowIndex) => raw[assignments[rowIndex]].members.push(row));
-    return raw.filter((cluster) => cluster.members.length).map((cluster) => {
-      const rtMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.rtDeltas[index])));
-      const accMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.accDeltas[index])));
-      const avgRt = mean(rtMeans), avgAcc = mean(accMeans);
-      return { ...cluster, rtMeans, accMeans, avgRt, avgAcc, label: describeCluster(cluster.members) };
-    }).sort((a, b) => a.avgRt - b.avgRt || b.avgAcc - a.avgAcc);
+    return raw.filter((cluster) => cluster.members.length)
+      .map((cluster) => summarizeCluster(cluster))
+      .sort((a, b) => a.avgRt - b.avgRt || b.avgAcc - a.avgAcc);
+  }
+  function currentCluster() {
+    return selectedClusterIndex === -1 ? allCluster : clusters[selectedClusterIndex] || clusters[0] || allCluster;
   }
   function groupRoundMeans(cluster) {
     return Array.from({ length: ANALYSIS_ROUNDS }, (_, roundIndex) => {
-      const rounds = cluster.members.map((member) => member.rounds[roundIndex]).filter(Boolean);
+      const rounds = cluster.members.map((member) => (member.movingAverageRounds || member.rounds)[roundIndex]).filter(Boolean);
+      const rawRounds = cluster.members.map((member) => member.rounds[roundIndex]).filter(Boolean);
       return {
         round: roundIndex + 1,
         rt: mean(rounds.map((round) => round.rtMean)),
         accuracy: mean(rounds.map((round) => round.accuracy)),
-        trialCount: sum(rounds.map((round) => round.trialCount || 0)),
+        trialCount: sum(rawRounds.map((round) => round.trialCount || 0)),
       };
     });
   }
@@ -387,7 +540,7 @@
       renderGroupMemberControls(cluster);
     });
     const avgText = document.createElement("span");
-    avgText.textContent = "그룹 평균";
+    avgText.textContent = selectedClusterIndex === -1 ? "전체 평균" : "그룹 평균";
     avgLabel.append(avgInput, avgText);
     els.groupMemberControls.append(avgLabel);
 
@@ -426,11 +579,17 @@
           rt: round.rtMean,
           accuracy: round.accuracy,
         })).filter((point) => Number.isFinite(point.rt) && Number.isFinite(point.accuracy)),
+        movingAveragePoints: (member.movingAverageRounds || []).map((round, index) => ({
+          round: index + 1,
+          rt: round.rtMean,
+          accuracy: round.accuracy,
+        })).filter((point) => Number.isFinite(point.rt) && Number.isFinite(point.accuracy)),
       }))
-      .filter((series) => series.points.length);
+      .filter((series) => series.points.length || series.movingAveragePoints.length);
     const allPoints = [
       ...(showGroupAverage ? groupPoints : []),
       ...memberSeries.flatMap((series) => series.points),
+      ...memberSeries.flatMap((series) => series.movingAveragePoints),
     ];
     if (!allPoints.length) {
       svg.append(textNode("그래프에 표시할 평균 또는 개인을 선택하세요.", { class: "empty-svg", x: 520, y: 250, "text-anchor": "middle" }));
@@ -454,6 +613,7 @@
     svg.append(makeSvg("line", { class: "axis-line", x1: left, y1: top, x2: left, y2: top + plotH }));
     svg.append(textNode("RT", { class: "axis-label", x: left + plotW / 2, y: height - 10, "text-anchor": "middle" }));
     svg.append(textNode("정답률", { class: "axis-label", transform: `translate(24 ${top + plotH / 2}) rotate(-90)`, "text-anchor": "middle" }));
+    if (memberSeries.length) svg.append(textNode("초록: 개인 이동평균선", { class: "chart-hint", x: left + 8, y: top + 22 }));
 
     memberSeries.forEach((series) => {
       if (series.points.length >= 2) {
@@ -464,6 +624,19 @@
           "stroke-width": 1.15,
           "stroke-opacity": .46,
         }));
+      }
+      if (series.movingAveragePoints.length >= 2) {
+        const path = makeSvg("path", {
+          class: "arrow-segment",
+          d: series.movingAveragePoints.map((point, index) => `${index ? "L" : "M"}${x(point.rt).toFixed(1)},${y(point.accuracy).toFixed(1)}`).join(" "),
+          stroke: "#16a34a",
+          "stroke-width": 2.3,
+          "stroke-opacity": .92,
+        });
+        const title = makeSvg("title");
+        title.textContent = `${series.member.participant.nickname || series.member.participant.id} ${MOVING_AVERAGE_WINDOW}회 이동평균선`;
+        path.append(title);
+        svg.append(path);
       }
       series.points.forEach((point) => {
         const dot = makeSvg("circle", { class: "arrow-dot", cx: x(point.rt), cy: y(point.accuracy), r: 3.2, fill: "#2563eb", "fill-opacity": .62 });
@@ -520,6 +693,29 @@
   }
   function renderGroupSelector() {
     clear(els.groupList);
+    if (allCluster) {
+      const label = document.createElement("label");
+      label.className = `group-select-option${selectedClusterIndex === -1 ? " is-selected" : ""}`;
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "groupSelection";
+      input.checked = selectedClusterIndex === -1;
+      input.addEventListener("change", () => {
+        selectedClusterIndex = -1;
+        showGroupAverage = true;
+        selectedMemberIds = new Set();
+        renderSelectedGroup();
+        renderGroupSelector();
+        renderManifoldMap();
+      });
+      const color = document.createElement("span");
+      color.className = "group-select-color";
+      color.style.background = "#64748b";
+      const text = document.createElement("span");
+      text.textContent = `그룹 0 · 전체 · ${allCluster.members.length}명`;
+      label.append(input, color, text);
+      els.groupList.append(label);
+    }
     clusters.forEach((cluster, index) => {
       const label = document.createElement("label");
       label.className = `group-select-option${index === selectedClusterIndex ? " is-selected" : ""}`;
@@ -552,10 +748,17 @@
       { label: "Accuracy", key: "accuracy", format: (value) => fmtPctTick(value, 0), extent: (values) => boundedExtent(values, [0, 1], .32, 0, 1, .05) },
     ];
     const points = groupRoundMeans(cluster);
+    const fits = [];
     panels.forEach((panel, panelIndex) => {
       const offset = panelIndex * 360;
       const left = offset + 54, top = 30, plotW = 288, plotH = 268;
-      const values = points.map((point) => point[panel.key]).filter(Number.isFinite);
+      const valid = points.filter((point) => Number.isFinite(point[panel.key]));
+      const fit = fitExponentialModel(valid, panel.key);
+      fits.push({ panel, fit });
+      const values = [
+        ...valid.map((point) => point[panel.key]),
+        ...(fit?.points || []).map((point) => point.y),
+      ].filter(Number.isFinite);
       const [yMin, yMax] = typeof panel.extent === "function" ? panel.extent(values) : panel.extent || extent(values, [0, 8]);
       const x = (round) => left + ((round - 1) / (ANALYSIS_ROUNDS - 1)) * plotW;
       const y = (value) => top + ((yMax - value) / (yMax - yMin || 1)) * plotH;
@@ -563,9 +766,17 @@
         els.groupModelChart.append(makeSvg("line", { class: "grid-line", x1: x(round), y1: top, x2: x(round), y2: top + plotH }));
         els.groupModelChart.append(textNode(String(round), { class: "tick-text", x: x(round), y: top + plotH + 20, "text-anchor": "middle" }));
       }
-      const valid = points.filter((point) => Number.isFinite(point[panel.key]));
       if (valid.length >= 2) {
         els.groupModelChart.append(makeSvg("path", { class: "series-line", d: valid.map((point, index) => `${index ? "L" : "M"}${x(point.round).toFixed(1)},${y(point[panel.key]).toFixed(1)}`).join(" "), stroke: "#2563eb", "stroke-width": 1.7 }));
+      }
+      if (fit?.points?.length >= 2) {
+        els.groupModelChart.append(makeSvg("path", {
+          class: "series-line",
+          d: fit.points.map((point, index) => `${index ? "L" : "M"}${x(point.x).toFixed(1)},${y(point.y).toFixed(1)}`).join(" "),
+          stroke: "#16a34a",
+          "stroke-width": 2.1,
+          "stroke-dasharray": "7 5",
+        }));
       }
       valid.forEach((point) => els.groupModelChart.append(makeSvg("circle", { cx: x(point.round), cy: y(point[panel.key]), r: 4.5, fill: "#ef4444", "fill-opacity": .9 })));
       els.groupModelChart.append(textNode(panel.label, { class: "axis-label", x: left + plotW / 2, y: 18, "text-anchor": "middle" }));
@@ -577,21 +788,47 @@
     const accLine = document.createElement("p");
     accLine.innerHTML = `<strong>정답률 평균 변화</strong><code>${fmtPct(first.accuracy)} → ${fmtPct(last.accuracy)} (${fmtPctPoint(last.accuracy - first.accuracy)})</code>`;
     els.groupModelEquations.append(rtLine, accLine);
+    fits.forEach(({ panel, fit }) => {
+      const line = document.createElement("p");
+      line.className = "model-equation green";
+      if (!fit) {
+        line.innerHTML = `<strong>${panel.label} 지수근사</strong><code>계산 불가</code>`;
+      } else {
+        line.innerHTML = `<strong>${panel.label} 지수근사</strong><code>y = ${fmtNum(fit.c, 3)} ${fit.a >= 0 ? "+" : "-"} ${fmtNum(Math.abs(fit.a), 3)}e^(${fmtNum(fit.b, 3)}x), R²=${fmtNum(fit.r2, 3)}</code>`;
+      }
+      els.groupModelEquations.append(line);
+    });
   }
   function aggregateConfusion(cluster, roundIndex) {
-    const counts = { tp: 0, fn: 0, fp: 0, tn: 0, included: 0 };
-    cluster.members.forEach((member) => {
+    const memberCounts = cluster.members.map((member) => {
       const confusion = member.rounds[roundIndex]?.confusion;
-      if (!confusion) return;
-      counts.tp += confusion.counts?.tp || 0;
-      counts.fn += confusion.counts?.fn || 0;
-      counts.fp += confusion.counts?.fp || 0;
-      counts.tn += confusion.counts?.tn || 0;
-      counts.included += confusion.included || 0;
-    });
-    return counts;
+      if (!confusion || !confusion.included) return null;
+      return {
+        tp: confusion.counts?.tp || 0,
+        fn: confusion.counts?.fn || 0,
+        fp: confusion.counts?.fp || 0,
+        tn: confusion.counts?.tn || 0,
+        included: confusion.included || 0,
+      };
+    }).filter(Boolean);
+    const rate = (key) => mean(memberCounts.map((counts) => counts.included ? counts[key] / counts.included : NaN));
+    return {
+      tp: mean(memberCounts.map((counts) => counts.tp)),
+      fn: mean(memberCounts.map((counts) => counts.fn)),
+      fp: mean(memberCounts.map((counts) => counts.fp)),
+      tn: mean(memberCounts.map((counts) => counts.tn)),
+      included: mean(memberCounts.map((counts) => counts.included)),
+      memberCount: memberCounts.length,
+      rates: {
+        tp: rate("tp"),
+        fn: rate("fn"),
+        fp: rate("fp"),
+        tn: rate("tn"),
+        accuracy: mean(memberCounts.map((counts) => counts.included ? (counts.tp + counts.tn) / counts.included : NaN)),
+      },
+    };
   }
-  function appendConfusionCell(grid, label, count, included, tone) {
+  function appendConfusionCell(grid, label, count, percent, tone) {
     const cell = document.createElement("div");
     cell.className = `confusion-matrix-cell ${tone}`;
     const labelNode = document.createElement("span");
@@ -599,10 +836,10 @@
     labelNode.textContent = label;
     const valueNode = document.createElement("strong");
     valueNode.className = "confusion-value";
-    valueNode.textContent = `${count}개`;
+    valueNode.textContent = `${fmtAvgCount(count)}개`;
     const percentNode = document.createElement("span");
     percentNode.className = "confusion-percent";
-    percentNode.textContent = fmtPct(included ? count / included : NaN);
+    percentNode.textContent = fmtPct(percent);
     cell.append(labelNode, valueNode, percentNode);
     grid.append(cell);
   }
@@ -616,7 +853,7 @@
       heading.textContent = `${roundIndex + 1}회차 평균`;
       const meta = document.createElement("p");
       meta.className = "confusion-meta";
-      meta.textContent = `정답률 ${fmtPct(counts.included ? (counts.tp + counts.tn) / counts.included : NaN)} · ${counts.included}응답`;
+      meta.textContent = `개인 평균 정답률 ${fmtPct(counts.rates.accuracy)} · ${counts.memberCount}명 · 평균 ${fmtAvgCount(counts.included)}응답`;
       const matrix = document.createElement("div");
       matrix.className = "confusion-matrix";
       ["", "응답 O", "응답 X", "정답 O"].forEach((text, index) => {
@@ -625,23 +862,23 @@
         axis.textContent = text;
         matrix.append(axis);
       });
-      appendConfusionCell(matrix, "맞음", counts.tp, counts.included, "correct");
-      appendConfusionCell(matrix, "놓침", counts.fn, counts.included, "wrong");
+      appendConfusionCell(matrix, "맞음", counts.tp, counts.rates.tp, "correct");
+      appendConfusionCell(matrix, "놓침", counts.fn, counts.rates.fn, "wrong");
       const xAxis = document.createElement("div");
       xAxis.className = "confusion-axis";
       xAxis.textContent = "정답 X";
       matrix.append(xAxis);
-      appendConfusionCell(matrix, "오경보", counts.fp, counts.included, "wrong");
-      appendConfusionCell(matrix, "맞음", counts.tn, counts.included, "correct");
+      appendConfusionCell(matrix, "오경보", counts.fp, counts.rates.fp, "wrong");
+      appendConfusionCell(matrix, "맞음", counts.tn, counts.rates.tn, "correct");
       card.append(heading, meta, matrix);
       els.groupConfusionList.append(card);
     }
   }
   function roundCorrectnessCounts(cluster, roundIndex) {
-    const counts = { correct: 0, wrong: 0, total: 0 };
-    cluster.members.forEach((member) => {
+    const memberCounts = cluster.members.map((member) => {
       const round = member.rounds[roundIndex];
       const results = member.participant.itemResults?.[roundKey(round)] || {};
+      const counts = { correct: 0, wrong: 0, total: 0 };
       commonItems.forEach((item) => {
         const bucket = correctnessBucket(results[item.id]);
         if (!bucket) return;
@@ -649,16 +886,24 @@
         if (bucket === "correct") counts.correct += 1;
         else counts.wrong += 1;
       });
-    });
-    return counts;
+      return counts.total ? counts : null;
+    }).filter(Boolean);
+    return {
+      correct: mean(memberCounts.map((counts) => counts.correct)),
+      wrong: mean(memberCounts.map((counts) => counts.wrong)),
+      total: mean(memberCounts.map((counts) => counts.total)),
+      memberCount: memberCounts.length,
+      correctRate: mean(memberCounts.map((counts) => counts.correct / counts.total)),
+      wrongRate: mean(memberCounts.map((counts) => counts.wrong / counts.total)),
+    };
   }
   function transitionCounts(cluster, transitionIndex) {
-    const counts = { wrongToCorrect: 0, wrongToWrong: 0, correctToCorrect: 0, correctToWrong: 0, compared: 0 };
-    cluster.members.forEach((member) => {
+    const memberCounts = cluster.members.map((member) => {
       const prev = member.rounds[transitionIndex];
       const next = member.rounds[transitionIndex + 1];
       const prevResults = member.participant.itemResults?.[roundKey(prev)] || {};
       const nextResults = member.participant.itemResults?.[roundKey(next)] || {};
+      const counts = { wrongToCorrect: 0, wrongToWrong: 0, correctToCorrect: 0, correctToWrong: 0, compared: 0 };
       commonItems.forEach((item) => {
         const previous = correctnessBucket(prevResults[item.id]);
         const following = correctnessBucket(nextResults[item.id]);
@@ -669,8 +914,23 @@
         else if (previous === "correct" && following === "correct") counts.correctToCorrect += 1;
         else if (previous === "correct" && following === "wrong") counts.correctToWrong += 1;
       });
-    });
-    return counts;
+      return counts.compared ? counts : null;
+    }).filter(Boolean);
+    const rate = (key) => mean(memberCounts.map((counts) => counts.compared ? counts[key] / counts.compared : NaN));
+    return {
+      wrongToCorrect: mean(memberCounts.map((counts) => counts.wrongToCorrect)),
+      wrongToWrong: mean(memberCounts.map((counts) => counts.wrongToWrong)),
+      correctToCorrect: mean(memberCounts.map((counts) => counts.correctToCorrect)),
+      correctToWrong: mean(memberCounts.map((counts) => counts.correctToWrong)),
+      compared: mean(memberCounts.map((counts) => counts.compared)),
+      memberCount: memberCounts.length,
+      rates: {
+        wrongToCorrect: rate("wrongToCorrect"),
+        wrongToWrong: rate("wrongToWrong"),
+        correctToCorrect: rate("correctToCorrect"),
+        correctToWrong: rate("correctToWrong"),
+      },
+    };
   }
   function appendRoundSummary(container, label, counts) {
     const item = document.createElement("div");
@@ -680,11 +940,11 @@
     title.textContent = label;
     const values = document.createElement("span");
     values.className = "transition-round-summary-values";
-    values.innerHTML = `<strong class="green">${counts.correct} 정답</strong><strong class="red">${counts.wrong} 오답</strong>`;
+    values.innerHTML = `<strong class="green">${fmtAvgCount(counts.correct)} 정답</strong><strong class="red">${fmtAvgCount(counts.wrong)} 오답</strong>`;
     item.append(title, values);
     container.append(item);
   }
-  function appendTransitionCell(grid, label, value, total, tone) {
+  function appendTransitionCell(grid, label, value, percent, tone) {
     const cell = document.createElement("div");
     cell.className = `transition-cell ${tone}`;
     const labelNode = document.createElement("span");
@@ -692,10 +952,10 @@
     labelNode.textContent = label;
     const valueNode = document.createElement("strong");
     valueNode.className = "transition-value";
-    valueNode.textContent = `${value}개`;
+    valueNode.textContent = `${fmtAvgCount(value)}개`;
     const percentNode = document.createElement("span");
     percentNode.className = "transition-percent";
-    percentNode.textContent = fmtPct(total ? value / total : NaN);
+    percentNode.textContent = fmtPct(percent);
     cell.append(labelNode, valueNode, percentNode);
     grid.append(cell);
   }
@@ -705,14 +965,14 @@
     const width = 1040, height = 500, left = 78, right = 36, top = 30, bottom = 62;
     const plotW = width - left - right, plotH = height - top - bottom;
     const maxCount = Math.max(1, ...points.flatMap((point) => [point.wrongToWrong, point.correctToWrong]));
-    const yMax = Math.max(4, Math.ceil(maxCount * 1.15));
+    const yMax = Math.max(4, maxCount * 1.15);
     const x = (index) => left + (index / Math.max(1, points.length - 1)) * plotW;
     const y = (value) => top + ((yMax - value) / yMax) * plotH;
     for (let tick = 0; tick <= 4; tick += 1) {
       const value = yMax * tick / 4;
       const yy = y(value);
       els.groupTransitionLineChart.append(makeSvg("line", { class: "grid-line", x1: left, y1: yy, x2: left + plotW, y2: yy }));
-      els.groupTransitionLineChart.append(textNode(String(Math.round(value)), { class: "tick-text", x: left - 10, y: yy + 4, "text-anchor": "end" }));
+      els.groupTransitionLineChart.append(textNode(fmtAvgCount(value), { class: "tick-text", x: left - 10, y: yy + 4, "text-anchor": "end" }));
     }
     points.forEach((point, index) => {
       const xx = x(index);
@@ -722,7 +982,7 @@
     els.groupTransitionLineChart.append(makeSvg("line", { class: "axis-line", x1: left, y1: top + plotH, x2: left + plotW, y2: top + plotH }));
     els.groupTransitionLineChart.append(makeSvg("line", { class: "axis-line", x1: left, y1: top, x2: left, y2: top + plotH }));
     els.groupTransitionLineChart.append(textNode("전환", { class: "axis-label", x: left + plotW / 2, y: height - 10, "text-anchor": "middle" }));
-    els.groupTransitionLineChart.append(textNode("개수", { class: "axis-label", transform: `translate(24 ${top + plotH / 2}) rotate(-90)`, "text-anchor": "middle" }));
+    els.groupTransitionLineChart.append(textNode("평균 개수", { class: "axis-label", transform: `translate(24 ${top + plotH / 2}) rotate(-90)`, "text-anchor": "middle" }));
     function draw(key, color, dash = "") {
       const d = points.map((point, index) => `${index ? "L" : "M"}${x(index).toFixed(1)},${y(point[key]).toFixed(1)}`).join(" ");
       els.groupTransitionLineChart.append(makeSvg("path", { class: "series-line", d, stroke: color, "stroke-width": 1.7, "stroke-dasharray": dash }));
@@ -747,7 +1007,7 @@
       heading.textContent = label;
       const meta = document.createElement("p");
       meta.className = "transition-meta";
-      meta.textContent = `${counts.compared}응답 비교`;
+      meta.textContent = `${counts.memberCount}명 · 평균 ${fmtAvgCount(counts.compared)}응답 비교`;
       const grid = document.createElement("div");
       grid.className = "transition-matrix";
       ["", "유지", "변화"].forEach((text, colIndex) => {
@@ -760,29 +1020,29 @@
       correctAxis.className = "transition-axis";
       correctAxis.textContent = "이전 정답";
       grid.append(correctAxis);
-      appendTransitionCell(grid, "정답 유지", counts.correctToCorrect, counts.compared, "correct");
-      appendTransitionCell(grid, "정답 → 오답", counts.correctToWrong, counts.compared, "declined");
+      appendTransitionCell(grid, "정답 유지", counts.correctToCorrect, counts.rates.correctToCorrect, "correct");
+      appendTransitionCell(grid, "정답 → 오답", counts.correctToWrong, counts.rates.correctToWrong, "declined");
       const wrongAxis = document.createElement("div");
       wrongAxis.className = "transition-axis";
       wrongAxis.textContent = "이전 오답";
       grid.append(wrongAxis);
-      appendTransitionCell(grid, "오답 유지", counts.wrongToWrong, counts.compared, "wrong");
-      appendTransitionCell(grid, "오답 → 정답", counts.wrongToCorrect, counts.compared, "improved");
+      appendTransitionCell(grid, "오답 유지", counts.wrongToWrong, counts.rates.wrongToWrong, "wrong");
+      appendTransitionCell(grid, "오답 → 정답", counts.wrongToCorrect, counts.rates.wrongToCorrect, "improved");
       card.append(heading, meta, grid);
       els.groupTransitionList.append(card);
     });
     renderTransitionLine(cluster);
   }
   function renderSelectedGroup() {
-    const cluster = clusters[selectedClusterIndex] || clusters[0];
+    const cluster = currentCluster();
     if (!cluster) return;
     renderGroupStats(cluster);
     renderGroupMemberControls(cluster);
     renderGroupArrowChart(cluster);
     renderGroupOverview(els.groupRtOverviewChart, cluster, "rt");
     renderGroupOverview(els.groupAccuracyOverviewChart, cluster, "accuracy");
-    els.selectedGroupTitle.textContent = `그룹 ${selectedClusterIndex + 1} · ${cluster.label}`;
-    els.selectedGroupMeta.textContent = `${cluster.members.length}명 · 5회 기준 · 평균 RT 변화 ${fmtNum(cluster.avgRt, 3)}초 · 평균 정답률 변화 ${fmtPctPoint(cluster.avgAcc)}`;
+    els.selectedGroupTitle.textContent = selectedClusterIndex === -1 ? `그룹 0 · ${cluster.label}` : `그룹 ${selectedClusterIndex + 1} · ${cluster.label}`;
+    els.selectedGroupMeta.textContent = `${cluster.members.length}명 · 5회 기준 · 회차당 평균 RT 변화 ${fmtNum(cluster.avgRt, 3)}초 · 회차당 평균 정답률 변화 ${fmtPctPoint(cluster.avgAcc)}`;
     renderModel(cluster);
     renderConfusion(cluster);
     renderTransitions(cluster);
@@ -790,14 +1050,15 @@
   function init() {
     const { rows, excluded } = analysisRows();
     const k = Math.min(CLUSTER_TARGET, rows.length);
-    els.clusterSummary.textContent = `5회 이상 제출자 ${rows.length}명 포함 · 5회 미만 ${excluded.length}명 제외 · baseline 변화 곡선 DTW(window=${DTW_WINDOW}) · 세부 군집 최소 ${MIN_CLUSTER_SIZE}명`;
+    els.clusterSummary.textContent = `5회 이상 제출자 ${rows.length}명 포함 · 5회 미만 ${excluded.length}명 제외 · 개인 ${MOVING_AVERAGE_WINDOW}회 이동평균선 기반 · 직전 회차 대비 변화 DTW(window=${DTW_WINDOW}) · 전체 평균 변화율 정규화 · cos 방향+상대크기 거리 · RT/정확도 난이도 보정 · 세부 군집 최소 ${MIN_CLUSTER_SIZE}명`;
     if (rows.length < 2) return;
     const dtwRows = prepareDtwRows(rows);
     const coordinates = classicalMds(pairwiseDtwDistances(dtwRows));
     dtwRows.forEach((row, index) => { row.embedding = coordinates[index] || { x: 0, y: 0 }; });
     const assignments = hierarchicalCluster(dtwRows, k);
     clusters = buildClusters(dtwRows, assignments);
-    selectedClusterIndex = 0;
+    allCluster = summarizeCluster({ index: -1, members: dtwRows }, "전체");
+    selectedClusterIndex = -1;
     renderGroupSelector();
     renderSelectedGroup();
     renderManifoldMap();

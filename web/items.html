@@ -11,9 +11,12 @@
       <header class="hero-shell compact-hero">
         <nav class="top-nav" aria-label="SVT dashboard pages">
           <a class="brand" href="index.html">SVT Studio</a>
-          <div class="nav-links">
-            <a class="nav-link active" href="index.html">개인 분석</a>
-            <a class="nav-link" href="insights.html">그룹별 분석</a>
+          <div class="nav-controls">
+            <div class="dataset-switcher" data-dataset-switcher aria-label="데이터셋 선택"></div>
+            <div class="nav-links">
+              <a class="nav-link active" href="index.html">개인 분석</a>
+              <a class="nav-link" href="insights.html">그룹별 분석</a>
+            </div>
           </div>
         </nav>
         <section class="hero-grid">
@@ -94,6 +97,7 @@
       </section>
     </main>
     <script src="data.js"></script>
+    <script src="dataset-switcher.js"></script>
     <script src="items.js"></script>
   </body>
 </html>

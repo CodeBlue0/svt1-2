@@ -120,6 +120,62 @@ def test_identity_resolution_merges_text_id_student_id_and_filename_name():
     assert {t.identity_key for trials in trials_by_file.values() for t in trials} == {"participant_id:applebanana"}
 
 
+def test_identity_resolution_merges_text_student_id_with_unique_filename_name():
+    named_file = m.FileRecord(
+        Path("named.csv"),
+        "named.csv",
+        "candidate",
+        identity_key="filename:강혜민:202231",
+        participant_id="anonymous",
+        student_id="",
+        name_from_filename="강혜민",
+        short_id="202231",
+        task="cst",
+        round_number=1,
+        file_datetime=datetime(2026, 5, 13, 10),
+        valid_trials=1,
+    )
+    anonymous_late = m.FileRecord(
+        Path("late.csv"),
+        "late.csv",
+        "candidate",
+        identity_key="participant_id:anonymous",
+        participant_id="anonymous",
+        student_id="강혜민",
+        name_from_filename="",
+        short_id="",
+        task="cst",
+        round_number=2,
+        file_datetime=datetime(2026, 5, 26, 10),
+        valid_trials=1,
+    )
+    other_anonymous = m.FileRecord(
+        Path("other.csv"),
+        "other.csv",
+        "candidate",
+        identity_key="participant_id:anonymous",
+        participant_id="anonymous",
+        student_id="크롱",
+        name_from_filename="",
+        short_id="",
+        task="cst",
+        round_number=3,
+        file_datetime=datetime(2026, 5, 27, 10),
+        valid_trials=1,
+    )
+    trials_by_file = {
+        "named.csv": [trial(identity=named_file.identity_key, round_number=1, participant_id="anonymous", student_id="", name="강혜민", short_id="202231")],
+        "late.csv": [trial(identity=anonymous_late.identity_key, round_number=2, participant_id="anonymous", student_id="강혜민", name="", short_id="")],
+        "other.csv": [trial(identity=other_anonymous.identity_key, round_number=3, participant_id="anonymous", student_id="크롱", name="", short_id="")],
+    }
+    m.resolve_identity_links([named_file, anonymous_late, other_anonymous], trials_by_file)
+    assert named_file.identity_key == "filename:강혜민:202231"
+    assert anonymous_late.identity_key == "filename:강혜민:202231"
+    assert other_anonymous.identity_key == "student_text:크롱"
+    assert {t.identity_key for t in trials_by_file["named.csv"] + trials_by_file["late.csv"]} == {"filename:강혜민:202231"}
+    assert {t.identity_key for t in trials_by_file["other.csv"]} == {"student_text:크롱"}
+
+
 def test_confusion_stats():
     trials = [trial(trial_index=i, rt=1.0) for i in range(1, 21)] + [trial(trial_index=21, rt=100.0, correct=0.0, response="X", answer="O")]
     stats = m.confusion_stats(trials)
@@ -209,6 +265,53 @@ def test_iter_candidate_files_reads_real_zip_archive():
         finally:
             m.ROOT = original_root
             m.EXTRACTED_DIR = original_extracted
+
+
+def test_iter_candidate_files_reads_generic_zip_archive_by_date():
+    original_root = m.ROOT
+    original_extracted = m.EXTRACTED_DIR
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        extracted = root / "extracted"
+        extracted.mkdir()
+        archive_path = extracted / "0609 svt.zip"
+        csv_name = "PARTICIPANT_cst_2026-06-09_17h46.36.887.csv"
+        csv_data = (
+            "participant_id,student_id,task,trial_index,stimulus_id,item_category,response,correct_answer,correct,rt,timestamp\n"
+            "zipnick,202500,cst,1,svt_shared,Noun,O,O,1,1.23,2026-06-09T17:46:36\n"
+        )
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr(csv_name, csv_data)
+        try:
+            m.ROOT = root
+            m.EXTRACTED_DIR = extracted
+            sources = m.iter_candidate_files()
+            assert len(sources) == 1
+            assert sources[0].rel_path == f"extracted/0609 svt.zip::{csv_name}"
+            record, trials = m.read_trials(sources[0], m.discover_round_anchors())
+            assert record.status == "candidate"
+            assert record.assignment_rule == "nearest_date"
+            assert len(trials) == 1
+        finally:
+            m.ROOT = original_root
+            m.EXTRACTED_DIR = original_extracted
+
+
+def test_dated_unknown_folder_csv_is_included_by_nearest_date():
+    source = m.CandidateSource(
+        rel_path="extracted/0609/PARTICIPANT_cst_2026-06-09_17h46.36.887.csv",
+        name="PARTICIPANT_cst_2026-06-09_17h46.36.887.csv",
+        parent_name="0609",
+        suffix=".csv",
+        data=(
+            "participant_id,student_id,task,trial_index,stimulus_id,item_category,response,correct_answer,correct,rt,timestamp\n"
+            "dated,202500,cst,1,svt_shared,Noun,O,O,1,1.23,2026-06-09T17:46:36\n"
+        ).encode("utf-8-sig"),
+    )
+    record, trials = m.read_trials(source, m.discover_round_anchors())
+    assert record.status == "candidate"
+    assert record.assignment_rule == "nearest_date"
+    assert len(trials) == 1
 
 
 def test_iter_candidate_files_prefers_extracted_round_dir_over_matching_zip():
@@ -351,7 +454,7 @@ def test_public_payload_excludes_single_round_participants():
 
 
 def run_all():
-    for test in [test_late_round_assignment, test_exact_copy_duplicates_are_collapsed_by_content_hash, test_same_source_bucket_different_times_remain_separate_attempts, test_identity_resolution_merges_text_id_student_id_and_filename_name, test_confusion_stats, test_comparable_stimulus_ids_identifies_round1_only_items, test_zip_archive_round_assignment_and_reading, test_extracted_round_directory_assignment, test_iter_candidate_files_reads_real_zip_archive, test_iter_candidate_files_prefers_extracted_round_dir_over_matching_zip, test_iter_candidate_files_excludes_svt_s1_directory, test_model_fallback_and_privacy_payload, test_public_payload_prefers_latest_selected_participant_id, test_student_id_public_fallback_when_participant_id_missing, test_filename_short_id_public_fallback_when_student_id_missing, test_public_payload_excludes_single_round_participants]:
+    for test in [test_late_round_assignment, test_exact_copy_duplicates_are_collapsed_by_content_hash, test_same_source_bucket_different_times_remain_separate_attempts, test_identity_resolution_merges_text_id_student_id_and_filename_name, test_identity_resolution_merges_text_student_id_with_unique_filename_name, test_confusion_stats, test_comparable_stimulus_ids_identifies_round1_only_items, test_zip_archive_round_assignment_and_reading, test_extracted_round_directory_assignment, test_iter_candidate_files_reads_real_zip_archive, test_iter_candidate_files_reads_generic_zip_archive_by_date, test_dated_unknown_folder_csv_is_included_by_nearest_date, test_iter_candidate_files_prefers_extracted_round_dir_over_matching_zip, test_iter_candidate_files_excludes_svt_s1_directory, test_model_fallback_and_privacy_payload, test_public_payload_prefers_latest_selected_participant_id, test_student_id_public_fallback_when_participant_id_missing, test_filename_short_id_public_fallback_when_student_id_missing, test_public_payload_excludes_single_round_participants]:
         test()
     print("fixture tests passed")
 
