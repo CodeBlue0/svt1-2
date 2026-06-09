@@ -533,7 +533,9 @@ h1 {
 .round-download {
   min-height: 28px;
   padding: 0;
+  border: 0;
   border-radius: 999px;
+  cursor: pointer;
   font-size: 12px;
   font-weight: 900;
   line-height: 28px;
@@ -553,6 +555,11 @@ h1 {
 .round-download:hover {
   color: #8b6e2d;
   background: transparent;
+}
+
+.round-download:disabled {
+  color: #98a3af;
+  cursor: wait;
 }
 
 .add-round {
