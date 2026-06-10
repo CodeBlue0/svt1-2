@@ -3,8 +3,9 @@
   const participants = data.participants || [];
   const commonItems = data.itemCatalog?.commonItems || [];
   const svgNS = "http://www.w3.org/2000/svg";
-  const ANALYSIS_ROUNDS = 5;
-  const TRANSITIONS = ["1→2", "2→3", "3→4", "4→5"];
+  const CLUSTER_ROUNDS = 6;
+  const DISPLAY_ROUNDS = 9;
+  const TRANSITIONS = Array.from({ length: DISPLAY_ROUNDS - 1 }, (_, index) => `${index + 1}→${index + 2}`);
   const CLUSTER_TARGET = 22;
   const MIN_CLUSTER_SIZE = 3;
   const DTW_WINDOW = 1;
@@ -315,7 +316,7 @@
           r2,
           predict,
           points: Array.from({ length: 33 }, (_, index) => {
-            const x = 1 + index * (ANALYSIS_ROUNDS - 1) / 32;
+            const x = 1 + index * (DISPLAY_ROUNDS - 1) / 32;
             return { x, y: predict(x) };
           }).filter((point) => Number.isFinite(point.y)),
         };
@@ -327,26 +328,36 @@
     const rows = [], excluded = [];
     participants.forEach((participant) => {
       const rounds = participantRounds(participant);
-      if (rounds.length < ANALYSIS_ROUNDS) { excluded.push(participant); return; }
-      const firstFive = rounds.slice(0, ANALYSIS_ROUNDS);
-      const smoothedRt = movingAverage(firstFive.map((round) => round.rtMean));
-      const smoothedAccuracy = movingAverage(firstFive.map((round) => round.accuracy));
-      const movingAverageRounds = firstFive.map((round, index) => ({
+      if (rounds.length < CLUSTER_ROUNDS) { excluded.push(participant); return; }
+      const clusterRounds = rounds.slice(0, CLUSTER_ROUNDS);
+      const displayRounds = rounds.slice(0, DISPLAY_ROUNDS);
+      const clusterSmoothedRt = movingAverage(clusterRounds.map((round) => round.rtMean));
+      const clusterSmoothedAccuracy = movingAverage(clusterRounds.map((round) => round.accuracy));
+      const displaySmoothedRt = movingAverage(displayRounds.map((round) => round.rtMean));
+      const displaySmoothedAccuracy = movingAverage(displayRounds.map((round) => round.accuracy));
+      const clusterMovingAverageRounds = clusterRounds.map((round, index) => ({
         ...round,
         rawRtMean: round.rtMean,
         rawAccuracy: round.accuracy,
-        rtMean: smoothedRt[index],
-        accuracy: smoothedAccuracy[index],
+        rtMean: clusterSmoothedRt[index],
+        accuracy: clusterSmoothedAccuracy[index],
+      }));
+      const movingAverageRounds = displayRounds.map((round, index) => ({
+        ...round,
+        rawRtMean: round.rtMean,
+        rawAccuracy: round.accuracy,
+        rtMean: displaySmoothedRt[index],
+        accuracy: displaySmoothedAccuracy[index],
       }));
       const rtDeltas = [], accDeltas = [], changeSequence = [];
-      for (let index = 1; index < movingAverageRounds.length; index += 1) {
-        const rtDelta = movingAverageRounds[index].rtMean - movingAverageRounds[index - 1].rtMean;
-        const accDelta = movingAverageRounds[index].accuracy - movingAverageRounds[index - 1].accuracy;
+      for (let index = 1; index < clusterMovingAverageRounds.length; index += 1) {
+        const rtDelta = clusterMovingAverageRounds[index].rtMean - clusterMovingAverageRounds[index - 1].rtMean;
+        const accDelta = clusterMovingAverageRounds[index].accuracy - clusterMovingAverageRounds[index - 1].accuracy;
         rtDeltas.push(rtDelta);
         accDeltas.push(accDelta);
       }
-      movingAverageRounds.forEach((round, index) => {
-        const previous = movingAverageRounds[index - 1];
+      clusterMovingAverageRounds.forEach((round, index) => {
+        const previous = clusterMovingAverageRounds[index - 1];
         const rtDelta = previous ? round.rtMean - previous.rtMean : 0;
         const accDelta = previous ? round.accuracy - previous.accuracy : 0;
         const adjustedRt = floorAdjustedRt(round.rtMean);
@@ -365,7 +376,7 @@
         });
       });
       const features = changeSequence.flatMap((point) => [point.rtChange, point.rtChangeAdjusted, point.accChange, point.accChangeAdjusted]);
-      if (features.every(Number.isFinite)) rows.push({ participant, rounds: firstFive, movingAverageRounds, rtDeltas, accDeltas, changeSequence, features });
+      if (features.every(Number.isFinite)) rows.push({ participant, rounds: displayRounds, clusterRounds, movingAverageRounds, clusterMovingAverageRounds, rtDeltas, accDeltas, changeSequence, features });
       else excluded.push(participant);
     });
     return { rows, excluded };
@@ -391,8 +402,8 @@
     return "전환 혼합형";
   }
   function summarizeCluster(cluster, label = null) {
-    const rtMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.rtDeltas[index])));
-    const accMeans = TRANSITIONS.map((_, index) => mean(cluster.members.map((member) => member.accDeltas[index])));
+    const rtMeans = Array.from({ length: CLUSTER_ROUNDS - 1 }, (_, index) => mean(cluster.members.map((member) => member.rtDeltas[index])));
+    const accMeans = Array.from({ length: CLUSTER_ROUNDS - 1 }, (_, index) => mean(cluster.members.map((member) => member.accDeltas[index])));
     const avgRt = mean(rtMeans), avgAcc = mean(accMeans);
     return { ...cluster, rtMeans, accMeans, avgRt, avgAcc, label: label || describeCluster(cluster.members) };
   }
@@ -407,7 +418,7 @@
     return selectedClusterIndex === -1 ? allCluster : clusters[selectedClusterIndex] || clusters[0] || allCluster;
   }
   function groupRoundMeans(cluster) {
-    return Array.from({ length: ANALYSIS_ROUNDS }, (_, roundIndex) => {
+    return Array.from({ length: DISPLAY_ROUNDS }, (_, roundIndex) => {
       const rounds = cluster.members.map((member) => (member.movingAverageRounds || member.rounds)[roundIndex]).filter(Boolean);
       const rawRounds = cluster.members.map((member) => member.rounds[roundIndex]).filter(Boolean);
       return {
@@ -522,7 +533,7 @@
   }
   function renderGroupStats(cluster) {
     const points = groupRoundMeans(cluster);
-    els.groupSelectedRounds.textContent = fmtNum(ANALYSIS_ROUNDS, 2);
+    els.groupSelectedRounds.textContent = String(DISPLAY_ROUNDS);
     els.groupSelectedRt.textContent = `${fmtNum(mean(points.map((point) => point.rt)), 2)}s`;
     els.groupSelectedAcc.textContent = fmtPct(mean(points.map((point) => point.accuracy)));
   }
@@ -673,9 +684,9 @@
     const [yMin, yMax] = metric === "accuracy"
       ? boundedExtent(points.map((point) => point.value), [0, 1], .32, 0, 1, .05)
       : extent(points.map((point) => point.value), [0, 8]);
-    const x = (round) => left + ((round - 1) / Math.max(1, ANALYSIS_ROUNDS - 1)) * plotW;
+    const x = (round) => left + ((round - 1) / Math.max(1, DISPLAY_ROUNDS - 1)) * plotW;
     const y = (value) => top + ((yMax - value) / (yMax - yMin || 1)) * plotH;
-    for (let round = 1; round <= ANALYSIS_ROUNDS; round += 1) {
+    for (let round = 1; round <= DISPLAY_ROUNDS; round += 1) {
       svg.append(makeSvg("line", { class: "grid-line", x1: x(round), y1: top, x2: x(round), y2: top + plotH }));
       svg.append(textNode(String(round), { class: "tick-text", x: x(round), y: top + plotH + 24, "text-anchor": "middle" }));
     }
@@ -760,9 +771,9 @@
         ...(fit?.points || []).map((point) => point.y),
       ].filter(Number.isFinite);
       const [yMin, yMax] = typeof panel.extent === "function" ? panel.extent(values) : panel.extent || extent(values, [0, 8]);
-      const x = (round) => left + ((round - 1) / (ANALYSIS_ROUNDS - 1)) * plotW;
+      const x = (round) => left + ((round - 1) / (DISPLAY_ROUNDS - 1)) * plotW;
       const y = (value) => top + ((yMax - value) / (yMax - yMin || 1)) * plotH;
-      for (let round = 1; round <= ANALYSIS_ROUNDS; round += 1) {
+      for (let round = 1; round <= DISPLAY_ROUNDS; round += 1) {
         els.groupModelChart.append(makeSvg("line", { class: "grid-line", x1: x(round), y1: top, x2: x(round), y2: top + plotH }));
         els.groupModelChart.append(textNode(String(round), { class: "tick-text", x: x(round), y: top + plotH + 20, "text-anchor": "middle" }));
       }
@@ -845,7 +856,7 @@
   }
   function renderConfusion(cluster) {
     clear(els.groupConfusionList);
-    for (let roundIndex = 0; roundIndex < ANALYSIS_ROUNDS; roundIndex += 1) {
+    for (let roundIndex = 0; roundIndex < DISPLAY_ROUNDS; roundIndex += 1) {
       const counts = aggregateConfusion(cluster, roundIndex);
       const card = document.createElement("article");
       card.className = "confusion-card";
@@ -877,6 +888,7 @@
   function roundCorrectnessCounts(cluster, roundIndex) {
     const memberCounts = cluster.members.map((member) => {
       const round = member.rounds[roundIndex];
+      if (!round) return null;
       const results = member.participant.itemResults?.[roundKey(round)] || {};
       const counts = { correct: 0, wrong: 0, total: 0 };
       commonItems.forEach((item) => {
@@ -901,6 +913,7 @@
     const memberCounts = cluster.members.map((member) => {
       const prev = member.rounds[transitionIndex];
       const next = member.rounds[transitionIndex + 1];
+      if (!prev || !next) return null;
       const prevResults = member.participant.itemResults?.[roundKey(prev)] || {};
       const nextResults = member.participant.itemResults?.[roundKey(next)] || {};
       const counts = { wrongToCorrect: 0, wrongToWrong: 0, correctToCorrect: 0, correctToWrong: 0, compared: 0 };
@@ -988,14 +1001,14 @@
       els.groupTransitionLineChart.append(makeSvg("path", { class: "series-line", d, stroke: color, "stroke-width": 1.7, "stroke-dasharray": dash }));
       points.forEach((point, index) => els.groupTransitionLineChart.append(makeSvg("circle", { cx: x(index), cy: y(point[key]), r: 4.2, fill: color, "fill-opacity": .96 })));
     }
-    draw("wrongToWrong", "#ef4444");
-    draw("correctToWrong", "#f59e0b", "6 5");
+    draw("wrongToWrong", "#be123c");
+    draw("correctToWrong", "#d97706", "6 5");
   }
   function renderTransitions(cluster) {
     clear(els.groupTransitionList);
     const overview = document.createElement("div");
     overview.className = "transition-round-overview";
-    for (let roundIndex = 0; roundIndex < ANALYSIS_ROUNDS; roundIndex += 1) {
+    for (let roundIndex = 0; roundIndex < DISPLAY_ROUNDS; roundIndex += 1) {
       appendRoundSummary(overview, `${roundIndex + 1}회차`, roundCorrectnessCounts(cluster, roundIndex));
     }
     els.groupTransitionList.append(overview);
@@ -1042,7 +1055,7 @@
     renderGroupOverview(els.groupRtOverviewChart, cluster, "rt");
     renderGroupOverview(els.groupAccuracyOverviewChart, cluster, "accuracy");
     els.selectedGroupTitle.textContent = selectedClusterIndex === -1 ? `그룹 0 · ${cluster.label}` : `그룹 ${selectedClusterIndex + 1} · ${cluster.label}`;
-    els.selectedGroupMeta.textContent = `${cluster.members.length}명 · 5회 기준 · 회차당 평균 RT 변화 ${fmtNum(cluster.avgRt, 3)}초 · 회차당 평균 정답률 변화 ${fmtPctPoint(cluster.avgAcc)}`;
+    els.selectedGroupMeta.textContent = `${cluster.members.length}명 · ${CLUSTER_ROUNDS}회 기준 · 회차당 평균 RT 변화 ${fmtNum(cluster.avgRt, 3)}초 · 회차당 평균 정답률 변화 ${fmtPctPoint(cluster.avgAcc)}`;
     renderModel(cluster);
     renderConfusion(cluster);
     renderTransitions(cluster);
@@ -1050,7 +1063,7 @@
   function init() {
     const { rows, excluded } = analysisRows();
     const k = Math.min(CLUSTER_TARGET, rows.length);
-    els.clusterSummary.textContent = `5회 이상 제출자 ${rows.length}명 포함 · 5회 미만 ${excluded.length}명 제외 · 개인 ${MOVING_AVERAGE_WINDOW}회 이동평균선 기반 · 직전 회차 대비 변화 DTW(window=${DTW_WINDOW}) · 전체 평균 변화율 정규화 · cos 방향+상대크기 거리 · RT/정확도 난이도 보정 · 세부 군집 최소 ${MIN_CLUSTER_SIZE}명`;
+    els.clusterSummary.textContent = `${CLUSTER_ROUNDS}회 이상 제출자 ${rows.length}명 포함 · ${CLUSTER_ROUNDS}회 미만 ${excluded.length}명 제외 · 군집은 1~${CLUSTER_ROUNDS}회 기준 · 그래프는 최대 ${DISPLAY_ROUNDS}회까지 표시 · 개인 ${MOVING_AVERAGE_WINDOW}회 이동평균선 기반 · 직전 회차 대비 변화 DTW(window=${DTW_WINDOW}) · 전체 평균 변화율 정규화 · cos 방향+상대크기 거리 · RT/정답률 난이도 보정 · 세부 군집 최소 ${MIN_CLUSTER_SIZE}명`;
     if (rows.length < 2) return;
     const dtwRows = prepareDtwRows(rows);
     const coordinates = classicalMds(pairwiseDtwDistances(dtwRows));

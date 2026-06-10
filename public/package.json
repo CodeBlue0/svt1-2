@@ -1,0 +1,9 @@
+{
+  "name": "svt-public-react-app",
+  "private": true,
+  "scripts": {
+    "dev": "../node_modules/.bin/vite --config ../vite.config.js",
+    "build": "cd .. && npm run build",
+    "preview": "../node_modules/.bin/vite preview --config ../vite.config.js"
+  }
+}

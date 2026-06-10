@@ -32,6 +32,9 @@ SKIP_NAMES = {".DS_Store"}
 ARCHIVE_SUFFIXES = set()
 DATA_SUFFIXES = {".csv", ".xlsx", ".numbers"}
 UNSUPPORTED_SUFFIXES = {".txt", ".crdownload", ""}
+STUDENT_ID_CORRECTIONS = {
+    "20251400564": "2025140564",
+}
 
 
 def nfc(value: object) -> str:
@@ -163,6 +166,9 @@ def clean_participant_id(value: object) -> str:
 
 def numeric_student_like_id(value: object) -> str:
     cleaned = nfc(value)
+    if re.fullmatch(r"\d+\.0", cleaned):
+        cleaned = cleaned[:-2]
+    cleaned = STUDENT_ID_CORRECTIONS.get(cleaned, cleaned)
     return cleaned if cleaned.isdigit() and len(cleaned) >= 6 else ""
 
 
@@ -170,14 +176,18 @@ def usable_text_participant_id(value: object) -> str:
     cleaned = nfc(value)
     if not cleaned or cleaned.casefold() in {"anonymous", "participant"}:
         return ""
+    if re.fullmatch(r"\d+\.0", cleaned):
+        return ""
     if cleaned.isdigit() and len(cleaned) >= 6:
         return ""
     return cleaned
 
 
-def usable_text_student_id(value: object) -> str:
+def usable_text_student_nickname(value: object) -> str:
     cleaned = nfc(value)
     if not cleaned or cleaned.casefold() in {"anonymous", "participant"}:
+        return ""
+    if re.fullmatch(r"\d+\.0", cleaned):
         return ""
     if cleaned.isdigit() and len(cleaned) >= 6:
         return ""
@@ -189,20 +199,17 @@ def identity_aliases(student_id: str, participant_id: str, name_from_filename: s
     student_numeric = numeric_student_like_id(student_id)
     participant_numeric = numeric_student_like_id(participant_id)
     participant_text = usable_text_participant_id(participant_id)
-    student_text = usable_text_student_id(student_id)
+    student_nickname = usable_text_student_nickname(student_id)
     if student_numeric:
         aliases.append(f"student_numeric:{student_numeric}")
     if participant_numeric:
         aliases.append(f"student_numeric:{participant_numeric}")
     if participant_text:
         aliases.append(f"participant_text:{participant_text.casefold()}")
-    if student_text:
-        aliases.append(f"student_text:{student_text.casefold()}")
-        aliases.append(f"filename_name_unique:{student_text}")
+    if student_nickname:
+        aliases.append(f"student_text:{student_nickname.casefold()}")
     if name_from_filename and short_id:
         aliases.append(f"filename_name_short:{name_from_filename}:{short_id}")
-    if name_from_filename and name_unique:
-        aliases.append(f"filename_name_unique:{name_from_filename}")
     return aliases
 
 
@@ -228,18 +235,12 @@ def canonical_participant_label(aliases: set[str]) -> str:
     participant_texts = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("participant_text:"))
     if participant_texts:
         return safe_name(participant_texts[0], "unknown_participant")
-    name_short = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("filename_name_short:"))
-    if name_short:
-        return safe_name(name_short[0].replace(":", "_"), "unknown_participant")
-    student_ids = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_numeric:"))
-    if student_ids:
-        return safe_name(student_ids[0], "unknown_participant")
     student_texts = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_text:"))
     if student_texts:
         return safe_name(student_texts[0], "unknown_participant")
-    name_unique = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("filename_name_unique:"))
-    if name_unique:
-        return safe_name(name_unique[0], "unknown_participant")
+    student_ids = sorted(alias.split(":", 1)[1] for alias in aliases if alias.startswith("student_numeric:"))
+    if student_ids:
+        return safe_name(student_ids[0], "unknown_participant")
     return "unknown_participant"
 
 
@@ -254,6 +255,9 @@ def csv_metadata(data: bytes) -> dict[str, str]:
     normalized = {nfc(key).casefold(): nfc(value) for key, value in row.items() if key is not None}
     student_id = nfc(normalized.get("student_id", ""))
     participant_id = nfc(normalized.get("participant_id", ""))
+    participant_text = usable_text_participant_id(participant_id)
+    student_nickname = usable_text_student_nickname(student_id)
+    student_numeric = numeric_student_like_id(student_id) or numeric_student_like_id(participant_id)
     task_raw = nfc(normalized.get("task", "")).casefold()
     date_raw = " ".join(
         nfc(normalized.get(key, ""))
@@ -267,12 +271,21 @@ def csv_metadata(data: bytes) -> dict[str, str]:
     elif "cst" in task_raw or "svt" in task_raw:
         task = "svt"
 
+    participant = ""
+    if participant_text:
+        participant = safe_name(participant_text, "unknown_participant")
+    elif student_nickname:
+        participant = safe_name(student_nickname, "unknown_participant")
+    elif student_numeric:
+        participant = safe_name(student_numeric, "unknown_participant")
+
     return {
-        "participant": clean_participant_id(student_id) or clean_participant_id(participant_id),
+        "participant": participant,
         "student_id": student_id,
         "participant_id": participant_id,
         "task": task,
         "date": date_for_text(date_raw) if date_raw else "",
+        "sort_key": date_raw,
     }
 
 
@@ -284,20 +297,26 @@ def file_metadata(source: Path, display_name: str, data: bytes | None = None, pa
     if not name_from_filename and not short_id:
         name_from_filename, short_id = filename_identity_parts(source.name)
     metadata = {
-        "participant": filename_participant_label(display_name) or filename_participant_label(source.name) or "unknown_participant",
+        "participant": "unknown_participant",
         "student_id": "",
         "participant_id": "",
         "name_from_filename": name_from_filename,
         "short_id": short_id,
         "task": path_task,
         "date": date_for_text(text),
+        "sort_key": text,
     }
-    if suffix == ".csv":
+    if suffix in DATA_SUFFIXES:
         if data is None and source.is_file():
             try:
-                data = source.read_bytes()
-            except OSError:
+                data = data_as_csv_bytes(source, display_name)
+            except Exception:
                 data = None
+        elif data is not None:
+            try:
+                data = data_as_csv_bytes(source, display_name, data)
+            except Exception:
+                pass
         if data:
             parsed = csv_metadata(data)
             metadata["participant"] = parsed.get("participant") or metadata["participant"]
@@ -305,6 +324,7 @@ def file_metadata(source: Path, display_name: str, data: bytes | None = None, pa
             metadata["participant_id"] = parsed.get("participant_id", "")
             metadata["task"] = parsed.get("task") or metadata["task"]
             metadata["date"] = parsed.get("date") or metadata["date"]
+            metadata["sort_key"] = parsed.get("sort_key") or metadata["sort_key"]
     aliases = identity_aliases(
         metadata.get("student_id", ""),
         metadata.get("participant_id", ""),
@@ -340,7 +360,7 @@ def build_participant_alias_map(files: Iterable[Path]) -> dict[str, str]:
                     for info in archive.infolist():
                         if info.is_dir() or should_skip_name(info.filename):
                             continue
-                        if Path(info.filename).suffix.lower() == ".csv":
+                        if Path(info.filename).suffix.lower() in DATA_SUFFIXES:
                             add_record(source, info.filename, archive.read(info))
             except zipfile.BadZipFile:
                 pass
@@ -356,12 +376,12 @@ def build_participant_alias_map(files: Iterable[Path]) -> dict[str, str]:
                         stderr=subprocess.PIPE,
                     )
                     for extracted in sorted(p for p in tmp_path.rglob("*") if p.is_file() and not should_skip_name(str(p.relative_to(tmp_path)))):
-                        if extracted.suffix.lower() == ".csv":
+                        if extracted.suffix.lower() in DATA_SUFFIXES:
                             add_record(source, str(extracted.relative_to(tmp_path)), extracted.read_bytes())
             except (subprocess.CalledProcessError, FileNotFoundError):
                 pass
             continue
-        if source.suffix.lower() == ".csv":
+        if source.suffix.lower() in DATA_SUFFIXES:
             add_record(source, source.name, None)
 
     name_to_shorts: dict[str, set[str]] = {}
@@ -372,7 +392,7 @@ def build_participant_alias_map(files: Iterable[Path]) -> dict[str, str]:
             name_to_shorts.setdefault(name, set()).add(short)
 
     uf = UnionFind()
-    record_aliases: list[list[str]] = []
+    record_aliases: list[tuple[dict[str, str], list[str]]] = []
     for record in raw_records:
         name = record.get("name_from_filename", "")
         short = record.get("short_id", "")
@@ -385,19 +405,30 @@ def build_participant_alias_map(files: Iterable[Path]) -> dict[str, str]:
         )
         if not aliases:
             continue
-        record_aliases.append(aliases)
+        record_aliases.append((record, aliases))
         first = aliases[0]
         for alias in aliases[1:]:
             uf.union(first, alias)
 
     root_aliases: dict[str, set[str]] = {}
-    for aliases in record_aliases:
+    for _, aliases in record_aliases:
         for alias in aliases:
             root_aliases.setdefault(uf.find(alias), set()).add(alias)
 
+    latest_student_text: dict[str, tuple[str, str]] = {}
+    for record, aliases in record_aliases:
+        student_nickname = usable_text_student_nickname(record.get("student_id", ""))
+        if not student_nickname:
+            continue
+        root = uf.find(aliases[0])
+        sort_key = record.get("sort_key", "")
+        current = latest_student_text.get(root)
+        if current is None or sort_key >= current[0]:
+            latest_student_text[root] = (sort_key, student_nickname)
+
     alias_map: dict[str, str] = {}
-    for aliases in root_aliases.values():
-        label = canonical_participant_label(aliases)
+    for root, aliases in root_aliases.items():
+        label = safe_name(latest_student_text[root][1], "unknown_participant") if root in latest_student_text else canonical_participant_label(aliases)
         for alias in aliases:
             alias_map[alias] = label
     return alias_map

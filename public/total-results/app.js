@@ -1,6 +1,16 @@
 (function () {
-  const data = window.SVT_DASHBOARD_DATA || { participants: [], rounds: [], quality: {} };
+  start().catch((error) => {
+    const summary = document.getElementById("datasetSummary");
+    if (summary) summary.textContent = error.message || "데이터를 불러오지 못했습니다.";
+    console.error(error);
+  });
+
+  async function start() {
+  const data = await (window.SVT_DASHBOARD_DATA_READY || Promise.resolve(window.SVT_DASHBOARD_DATA || { participants: [], rounds: [], quality: {} }));
   const participants = data.participants || [];
+  const datasetLabel = data.datasetLabel || "SVT";
+  const datasetKey = data.datasetKey || (String(datasetLabel).toLowerCase() === "svt" ? "svt" : String(datasetLabel).toLowerCase());
+  const isSvtDataset = datasetKey === "svt";
   const configuredRounds = (data.rounds || []).length;
   const maxAttempts = Math.max(1, configuredRounds, ...participants.map((participant) => Object.keys(participant.rounds || {}).length));
   const selected = new Set();
@@ -15,6 +25,7 @@
   let autoTransitionTimer = null;
 
   const els = {
+    datasetTitle: document.querySelector(".hero-grid h1"),
     datasetSummary: document.getElementById("datasetSummary"),
     nameSearch: document.getElementById("nameSearch"),
     nameList: document.getElementById("nameList"),
@@ -48,11 +59,33 @@
     Object.entries(attrs).forEach(([key, value]) => value !== undefined && value !== null && node.setAttribute(key, value));
     return node;
   }
+  function setText(id, text) {
+    const node = document.getElementById(id);
+    if (node) node.textContent = text;
+  }
   function textNode(text, attrs = {}) { const node = makeSvg("text", attrs); node.textContent = text; return node; }
   function clearSvg(svg) { while (svg.firstChild) svg.removeChild(svg.firstChild); }
   function formatPercent(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "-"; }
   function formatNumber(value, digits = 2) { return Number.isFinite(value) ? value.toFixed(digits) : "-"; }
-  function participantHaystack(p) { return [p.nickname, p.id, p.idSource].join(" ").toLowerCase(); }
+  function participantTokenVariants(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return [];
+    const variants = new Set([
+      trimmed,
+      trimmed.toLowerCase(),
+      trimmed.replace(/_/g, " "),
+      trimmed.replace(/\s+/g, "_"),
+    ]);
+    return Array.from(variants).map((token) => token.toLowerCase()).filter(Boolean);
+  }
+  function participantLookupTokens(p) {
+    return [
+      ...participantTokenVariants(p?.nickname),
+      ...participantTokenVariants(p?.id),
+      ...participantTokenVariants(p?.idSource),
+    ];
+  }
+  function participantHaystack(p) { return participantLookupTokens(p).join(" "); }
   function participantIdSourceLabel(source) {
     if (source === "participant_id") return "ID";
     if (source === "student_id") return "학번";
@@ -60,7 +93,11 @@
   }
   function visibleParticipants() {
     const query = els.nameSearch.value.trim().toLowerCase();
-    return participants.filter((p) => participantHaystack(p).includes(query));
+    const queryTokens = participantTokenVariants(query);
+    return participants.filter((p) => {
+      const haystack = participantHaystack(p);
+      return queryTokens.length ? queryTokens.some((token) => haystack.includes(token)) : true;
+    });
   }
   function participantRounds(participant) {
     return Object.values(participant.rounds || {}).sort((a, b) => (a.attemptIndex || a.round) - (b.attemptIndex || b.round));
@@ -189,7 +226,20 @@
   function selectedParticipantId() {
     return Array.from(selected).find((id) => id !== AVERAGE_ID) || "";
   }
+  function requestedParticipantId() {
+    const params = new URLSearchParams(window.location.search);
+    const requested = params.get("participant") || params.get("id") || "";
+    const requestedTokens = participantTokenVariants(requested);
+    if (!requestedTokens.length) return "";
+    const match = participants.find((participant) => {
+      const lookup = new Set(participantLookupTokens(participant));
+      return requestedTokens.some((token) => lookup.has(token));
+    });
+    return match?.id || "";
+  }
   function defaultParticipantId() {
+    const requested = requestedParticipantId();
+    if (requested) return requested;
     return participants.some((participant) => participant.id === DEFAULT_PARTICIPANT_ID)
       ? DEFAULT_PARTICIPANT_ID
       : participants[0]?.id || "";
@@ -539,7 +589,25 @@
   }
   function renderAll() { renderNameList(); renderTransitionFilter(); renderZoomControl(); renderArrowChart(); renderOverview(els.rtOverviewChart, "rt"); renderOverview(els.accuracyOverviewChart, "accuracy"); renderStats(); }
 
-  els.datasetSummary.textContent = `${participants.length}명 · ${data.quality?.selectedTrialCount || 0} trials · 공통 ${data.itemCatalog?.commonItems?.length || 0} · 제외 ${data.quality?.ignoredNonComparableTrialCount || 0}`;
+  document.documentElement.dataset.datasetKey = datasetKey;
+  document.body.dataset.datasetKey = datasetKey;
+  if (els.datasetTitle) els.datasetTitle.textContent = datasetLabel;
+  if (!isSvtDataset) {
+    setText("priorityEyebrow", "cohort metric summary");
+    setText("priorityTitle", `${datasetLabel} 반응시간 및 정답률 변화`);
+    setText("prioritySummary", "선택 참가자의 RT와 정답률 변화 흐름을 먼저 봅니다.");
+    setText("trendEyebrow", "selected participant trends");
+    setText("trendTitle", "차수별 변화 (RT & 정답률)");
+    setText("rtOverviewTitle", `${datasetLabel} - RT`);
+    setText("accuracyOverviewTitle", `${datasetLabel} - Accuracy`);
+    setText("modelEyebrow", "individual analysis");
+    setText("modelCardTitle", `${datasetLabel} 모델`);
+  }
+  els.datasetSummary.textContent = data.loadError
+    ? data.loadError
+    : !isSvtDataset
+      ? `${participants.length}명 · ${data.quality?.selectedTrialCount || 0} trials · ${datasetLabel}`
+      : `${participants.length}명 · ${data.quality?.selectedTrialCount || 0} trials · 공통 ${data.itemCatalog?.commonItems?.length || 0} · 제외 ${data.quality?.ignoredNonComparableTrialCount || 0}`;
   els.nameSearch.addEventListener("input", renderNameList);
   els.clearSelection.addEventListener("click", () => { selected.clear(); zoomToSelection = false; renderAll(); emitParticipantSelection(); });
   els.zoomToSelection?.addEventListener("click", () => { zoomToSelection = !zoomToSelection; renderAll(); });
@@ -555,4 +623,5 @@
   if (initialParticipantId) selected.add(initialParticipantId);
   renderAll();
   emitParticipantSelection();
+  }
 })();

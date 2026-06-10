@@ -51,7 +51,25 @@
   function clearSvg(svg) { while (svg.firstChild) svg.removeChild(svg.firstChild); }
   function formatPercent(value) { return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "-"; }
   function formatNumber(value, digits = 2) { return Number.isFinite(value) ? value.toFixed(digits) : "-"; }
-  function participantHaystack(p) { return [p.nickname, p.id, p.idSource].join(" ").toLowerCase(); }
+  function participantTokenVariants(value) {
+    const trimmed = String(value || "").trim();
+    if (!trimmed) return [];
+    const variants = new Set([
+      trimmed,
+      trimmed.toLowerCase(),
+      trimmed.replace(/_/g, " "),
+      trimmed.replace(/\s+/g, "_"),
+    ]);
+    return Array.from(variants).map((token) => token.toLowerCase()).filter(Boolean);
+  }
+  function participantLookupTokens(p) {
+    return [
+      ...participantTokenVariants(p?.nickname),
+      ...participantTokenVariants(p?.id),
+      ...participantTokenVariants(p?.idSource),
+    ];
+  }
+  function participantHaystack(p) { return participantLookupTokens(p).join(" "); }
   function participantIdSourceLabel(source) {
     if (source === "participant_id") return "ID";
     if (source === "student_id") return "학번";
@@ -59,7 +77,11 @@
   }
   function visibleParticipants() {
     const query = els.nameSearch.value.trim().toLowerCase();
-    return participants.filter((p) => participantHaystack(p).includes(query));
+    const queryTokens = participantTokenVariants(query);
+    return participants.filter((p) => {
+      const haystack = participantHaystack(p);
+      return queryTokens.length ? queryTokens.some((token) => haystack.includes(token)) : true;
+    });
   }
   function participantRounds(participant) {
     return Object.values(participant.rounds || {}).sort((a, b) => (a.attemptIndex || a.round) - (b.attemptIndex || b.round));

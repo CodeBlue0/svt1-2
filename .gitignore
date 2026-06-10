@@ -14,14 +14,17 @@ scripts/*
 !scripts/generate_maze_web_data.py
 !scripts/test_compute_svt_metrics.py
 !scripts/organize_data_folder.py
+!scripts/copy-public-static.mjs
 
 # Local caches and OS/editor noise
+node_modules/
+dist/
 __pycache__/
 *.py[cod]
 .DS_Store
 .omx/
 .codex/*
+supabase/functions/.env*
 
 제출현황_통합_MAZE (1).xlsx
 제출현황_통합_SVT (1).xlsx
-/public

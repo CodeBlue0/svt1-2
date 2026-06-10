@@ -1,6 +1,6 @@
 # SVT Experiment Dashboard
 
-React entry page plus static dashboard pages for SVT experiment latency, accuracy, individual
+Vite React entry page plus static dashboard pages for SVT experiment latency, accuracy, individual
 trend/model-fit, confusion-matrix, item-correctness, and cohort insight analysis.
 Participant rounds are assigned by each participant's selected submission
 timestamps, not by source folder names. Analyses use only items shared across
@@ -8,9 +8,10 @@ observed attempts; first-attempt-only items are ignored.
 
 ## Public Files
 
-- `public/index.html` / `public/main.js`: React experiment result lookup page. It reads Supabase when `public/supabase-config.js` is configured and falls back to the generated public payload while credentials are empty.
+- `public/index.html` / `public/src/App.jsx` / `public/src/main.jsx`: Vite React experiment result lookup page. It reads Supabase when `public/src/supabase-config.js` is configured and falls back to the generated public payload while credentials are empty.
 - `public/total-results/`: migrated static dashboard from the previous `web/` folder. The top-left option on the React page links here for 전체 결과보기.
-- `public/supabase-config.js`: Supabase URL, anon key, table names, and participant ID column mapping for the lookup page.
+- `public/src/supabase-config.js`: Supabase URL, anon key, table names, and participant ID column mapping for the React lookup page.
+- `public/supabase-config.js`: same browser global config kept for the static `public/total-results/` pages.
 - `web/index.html` / `web/app.js`: multi-participant comparison page with the priority RT × accuracy arrow trajectory graph.
 - `web/items.html` / `web/items.js`: single-participant analysis page with learning curve, model fits, confusion matrix, and the comparable 176-item correctness grid.
 - `web/insights.html` / `web/insights.js`: cohort insight page for participation funnel, round landscape, speed-accuracy atlas, and item difficulty watch list.
@@ -62,10 +63,11 @@ python3 -m http.server 8000 --directory web
 
 Open `http://localhost:8000` for the comparison page, `/items.html` for individual analysis, and `/insights.html` for cohort insights.
 
-For the new React shell:
+For the React shell:
 
 ```bash
-python3 -m http.server 8000 --directory public
+npm install
+npm run dev
 ```
 
-Open `http://localhost:8000` for the lookup page and `/total-results/` for the migrated full dashboard.
+Open the Vite URL for the lookup page and `/total-results/` for the migrated full dashboard.

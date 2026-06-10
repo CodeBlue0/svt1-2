@@ -1,7 +1,17 @@
 (function () {
-  const data = window.SVT_DASHBOARD_DATA || { participants: [], itemCatalog: {} };
+  start().catch((error) => {
+    const summary = document.getElementById("itemSummary");
+    if (summary) summary.textContent = error.message || "데이터를 불러오지 못했습니다.";
+    console.error(error);
+  });
+
+  async function start() {
+  const data = await (window.SVT_DASHBOARD_DATA_READY || Promise.resolve(window.SVT_DASHBOARD_DATA || { participants: [], itemCatalog: {} }));
   const participants = data.participants || [];
   const commonItems = data.itemCatalog?.commonItems || [];
+  const datasetLabel = data.datasetLabel || "SVT";
+  const datasetKey = data.datasetKey || (String(datasetLabel).toLowerCase() === "svt" ? "svt" : String(datasetLabel).toLowerCase());
+  const isSvtDataset = datasetKey === "svt";
   const svgNS = "http://www.w3.org/2000/svg";
 
   const els = {
@@ -14,6 +24,8 @@
     confusionList: document.getElementById("confusionList"),
     transitionList: document.getElementById("transitionList"),
     transitionLineChart: document.getElementById("transitionLineChart"),
+    modelCardTitle: document.getElementById("modelCardTitle"),
+    itemMapSection: document.getElementById("itemMapSection"),
     itemMapMode: document.getElementById("itemMapMode"),
     itemMapSummary: document.getElementById("itemMapSummary"),
     itemGrid: document.getElementById("itemGrid"),
@@ -24,6 +36,11 @@
   const itemTooltip = document.createElement("div");
   itemTooltip.className = "item-tooltip";
   document.body.append(itemTooltip);
+
+  if (!isSvtDataset) {
+    if (els.itemMapSection) els.itemMapSection.hidden = true;
+    if (els.modelCardTitle) els.modelCardTitle.textContent = `${datasetLabel} 모델`;
+  }
 
   function makeSvg(tag, attrs = {}) {
     const node = document.createElementNS(svgNS, tag);
@@ -530,6 +547,11 @@
     });
   }
   function renderCommonGrid(participant) {
+    if (!isSvtDataset) {
+      clear(els.itemGrid);
+      if (els.itemMapSummary) els.itemMapSummary.textContent = "";
+      return;
+    }
     if (!participant) {
       clear(els.itemGrid);
       return;
@@ -547,14 +569,14 @@
   function render() {
     const participant = currentParticipant();
     if (!participant) {
-      els.title.textContent = "반응시간, 정확도 분석";
+      els.title.textContent = !isSvtDataset ? `${datasetLabel} 반응시간, 정확도 분석 모델` : "반응시간, 정확도 분석";
       els.meta.textContent = "";
       if (els.itemSummary) els.itemSummary.textContent = "";
-      if (els.itemMapSummary) els.itemMapSummary.textContent = "공통 문항 176개";
+      if (els.itemMapSummary) els.itemMapSummary.textContent = !isSvtDataset ? "" : "공통 문항 176개";
       [els.modelChart, els.modelEquations, els.confusionList, els.transitionList, els.transitionLineChart, els.itemGrid].forEach(clear);
       return;
     }
-    els.title.textContent = "반응시간, 정확도 분석";
+    els.title.textContent = !isSvtDataset ? `${datasetLabel} 반응시간, 정확도 분석 모델` : "반응시간, 정확도 분석";
     const completed = Object.keys(participant.rounds || {}).length;
     const trials = Object.values(participant.rounds || {}).reduce((sum, round) => sum + (round.trialCount || 0), 0);
     const emptyCommonRounds = participantRounds(participant).filter((round) => {
@@ -562,7 +584,9 @@
       return commonItems.every((item) => !Number.isFinite(roundResults[item.id]?.correct));
     }).map((round) => String(round.attemptIndex || round.round));
     const emptyNote = emptyCommonRounds.length ? ` · ${emptyCommonRounds.join(", ")} 공통 없음` : "";
-    els.meta.textContent = `${participant.nickname} · ${completed}회 · ${trials} selected trials · 공통 ${commonItems.length}문항${emptyNote}`;
+    els.meta.textContent = !isSvtDataset
+      ? `${participant.nickname} · ${completed}회 · ${trials} selected trials`
+      : `${participant.nickname} · ${completed}회 · ${trials} selected trials · 공통 ${commonItems.length}문항${emptyNote}`;
     renderModel(participant);
     renderConfusion(participant);
     renderAnswerTransitions(participant);
@@ -598,6 +622,7 @@
     if (els.itemSummary) els.itemSummary.textContent = "";
   }
   window.addEventListener("svt:participant-selection-change", (event) => selectParticipant(event.detail?.id, false));
-  renderItemMapModeOptions();
+  if (isSvtDataset) renderItemMapModeOptions();
   render();
+  }
 })();
