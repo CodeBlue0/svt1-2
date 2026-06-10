@@ -473,6 +473,47 @@ h1 {
   animation: analysisStageIn 1.55s .46s var(--ease-soft) both;
 }
 
+.analysis-course-transition {
+  display: grid;
+  gap: 18px;
+  perspective: 1200px;
+  transform-origin: 50% 28%;
+  animation: coursePanelEnter .78s var(--ease-soft) both;
+  will-change: opacity, transform, filter;
+}
+
+.analysis-course-transition.direction-backward {
+  animation-name: coursePanelEnterBack;
+}
+
+.analysis-course-transition .analysis-guide-panel {
+  animation: courseSurfaceSettle .92s .04s var(--ease-soft) both;
+}
+
+.analysis-course-transition .analysis-guide-heading,
+.analysis-course-transition .guide-legend,
+.analysis-course-transition .model-equations,
+.analysis-course-transition .llm-guide-card,
+.analysis-course-transition .summary-metric-grid,
+.analysis-course-transition .weak-item-list {
+  animation: courseDetailRise .82s .12s var(--ease-soft) both;
+}
+
+.analysis-course-transition .guide-chart-frame,
+.analysis-course-transition .forecast-grid,
+.analysis-course-transition .wide-analysis-chart,
+.analysis-course-transition .item-map-grid,
+.analysis-course-transition .full-item-map-grid,
+.analysis-course-transition .change-only-chart,
+.analysis-course-transition .distribution-grid {
+  animation: courseGraphReveal .98s .16s var(--ease-soft) both;
+  transform-origin: 50% 48%;
+}
+
+.analysis-course-transition .analysis-step-nav {
+  animation: courseNavRise .72s .28s var(--ease-soft) both;
+}
+
 .course-intro {
   display: grid;
   gap: 6px;
@@ -1656,6 +1697,90 @@ h1 {
   }
 }
 
+@keyframes coursePanelEnter {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate3d(34px, 12px, 0) scale(.986) rotateX(1.4deg);
+  }
+  62% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1) rotateX(0);
+  }
+}
+
+@keyframes coursePanelEnterBack {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate3d(-34px, 12px, 0) scale(.986) rotateX(1.4deg);
+  }
+  62% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) scale(1) rotateX(0);
+  }
+}
+
+@keyframes courseSurfaceSettle {
+  from {
+    box-shadow: 0 10px 22px rgba(17, 24, 39, 0.05);
+    transform: scale(.992);
+  }
+  to {
+    box-shadow: 0 16px 38px rgba(17, 24, 39, 0.08);
+    transform: scale(1);
+  }
+}
+
+@keyframes courseDetailRise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes courseGraphReveal {
+  from {
+    opacity: 0;
+    filter: saturate(.86) blur(5px);
+    transform: translateY(18px) scale(.988);
+  }
+  58% {
+    opacity: 1;
+    filter: saturate(1) blur(0);
+  }
+  to {
+    opacity: 1;
+    filter: saturate(1) blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes courseNavRise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes exitUpFade {
   from {
     opacity: 1;
@@ -1708,6 +1833,28 @@ h1 {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-course-transition,
+  .analysis-course-transition .analysis-guide-panel,
+  .analysis-course-transition .analysis-guide-heading,
+  .analysis-course-transition .guide-legend,
+  .analysis-course-transition .model-equations,
+  .analysis-course-transition .llm-guide-card,
+  .analysis-course-transition .summary-metric-grid,
+  .analysis-course-transition .weak-item-list,
+  .analysis-course-transition .guide-chart-frame,
+  .analysis-course-transition .forecast-grid,
+  .analysis-course-transition .wide-analysis-chart,
+  .analysis-course-transition .item-map-grid,
+  .analysis-course-transition .full-item-map-grid,
+  .analysis-course-transition .change-only-chart,
+  .analysis-course-transition .distribution-grid,
+  .analysis-course-transition .analysis-step-nav {
+    animation-duration: .01ms;
+    animation-delay: 0ms;
   }
 }
 

@@ -3,6 +3,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
   const CHART = { width: 990, height: 504, left: 74, right: 36, top: 32, bottom: 61 };
   const SCRIPT_LOADS = new Map();
   const MOVING_AVERAGE_WINDOW = 3;
+  const ANALYSIS_COURSE_ORDER = ["rt-accuracy", "forecast", "ox", "change", "item-map", "item-map-full", "summary"];
   const VALID_FILE_EXTENSIONS = [".xlsx", ".csv", ".numbers"];
   const PAGE_SIZE = 1000;
   const EXPORT_CONFIG = {
@@ -1932,6 +1933,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
     const [selectedPreviewRound, setSelectedPreviewRound] = useState("all");
     const [previewGraphMode, setPreviewGraphMode] = useState("trajectory");
     const [analysisCourse, setAnalysisCourse] = useState("rt-accuracy");
+    const [analysisCourseDirection, setAnalysisCourseDirection] = useState("forward");
     const [analysisStarted, setAnalysisStarted] = useState(false);
     const [deepSeekAnalysis, setDeepSeekAnalysis] = useState({ status: "idle", text: "" });
     const [transitionAnalysis, setTransitionAnalysis] = useState({ status: "idle", text: "" });
@@ -1977,6 +1979,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
       setSelectedPreviewRound("all");
       setPreviewGraphMode("trajectory");
       setAnalysisCourse("rt-accuracy");
+      setAnalysisCourseDirection("forward");
       setAnalysisStarted(false);
       setDeepSeekAnalysis({ status: "idle", text: "" });
       setTransitionAnalysis({ status: "idle", text: "" });
@@ -2178,6 +2181,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
       setSelectedPreviewRound("all");
       setPreviewGraphMode("trajectory");
       setAnalysisCourse("rt-accuracy");
+      setAnalysisCourseDirection("forward");
       setAnalysisStarted(true);
       window.setTimeout(() => {
         document.querySelector(".guided-analysis-course")?.scrollIntoView({
@@ -2283,7 +2287,16 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
 
     function goToExperimentGraphCourse() {
       setSelectedPreviewRound("all");
-      setAnalysisCourse("rt-accuracy");
+      goToAnalysisCourse("rt-accuracy");
+    }
+
+    function goToAnalysisCourse(nextCourse) {
+      setAnalysisCourse((currentCourse) => {
+        const currentIndex = ANALYSIS_COURSE_ORDER.indexOf(currentCourse);
+        const nextIndex = ANALYSIS_COURSE_ORDER.indexOf(nextCourse);
+        setAnalysisCourseDirection(nextIndex >= currentIndex ? "forward" : "backward");
+        return nextCourse;
+      });
     }
 
     function closeGuidedAnalysis() {
@@ -2291,6 +2304,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
       setSelectedPreviewRound("all");
       setPreviewGraphMode("trajectory");
       setAnalysisCourse("rt-accuracy");
+      setAnalysisCourseDirection("forward");
       setTransitionAnalysis({ status: "idle", text: "" });
       setSummaryAnalysis({ status: "idle", text: "" });
       setItemMapTooltip({ visible: false, text: "", x: 0, y: 0 });
@@ -2333,29 +2347,29 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
         return renderForecastPreview(
           dashboardParticipant,
           goToExperimentGraphCourse,
-          () => setAnalysisCourse("ox")
+          () => goToAnalysisCourse("ox")
         );
       }
       if (analysisCourse === "ox") {
         return renderOxResponsePreview(
           dashboardParticipant,
-          () => setAnalysisCourse("forecast"),
-          () => setAnalysisCourse("change")
+          () => goToAnalysisCourse("forecast"),
+          () => goToAnalysisCourse("change")
         );
       }
       if (analysisCourse === "change") {
         return renderCorrectnessChangePreview(
           dashboardParticipant,
-          () => setAnalysisCourse("ox"),
-          () => setAnalysisCourse("item-map"),
+          () => goToAnalysisCourse("ox"),
+          () => goToAnalysisCourse("item-map"),
           transitionAnalysis
         );
       }
       if (analysisCourse === "item-map") {
         return renderItemMapPreview(
           dashboardParticipant,
-          () => setAnalysisCourse("change"),
-          () => setAnalysisCourse("item-map-full")
+          () => goToAnalysisCourse("change"),
+          () => goToAnalysisCourse("item-map-full")
         );
       }
       if (analysisCourse === "item-map-full") {
@@ -2363,11 +2377,11 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
           dashboardParticipant,
           () => {
             hideItemMapTooltip();
-            setAnalysisCourse("item-map");
+            goToAnalysisCourse("item-map");
           },
           () => {
             hideItemMapTooltip();
-            setAnalysisCourse("summary");
+            goToAnalysisCourse("summary");
           },
           itemMapTooltipHandlers
         );
@@ -2375,7 +2389,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
       if (analysisCourse === "summary") {
         return renderFinalSummaryPreview(
           dashboardParticipant,
-          () => setAnalysisCourse("item-map-full"),
+          () => goToAnalysisCourse("item-map-full"),
           goToMainPage,
           summaryAnalysis
         );
@@ -2390,7 +2404,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
         closeGuidedAnalysis,
         submittedName,
         deepSeekAnalysis,
-        () => setAnalysisCourse("forecast")
+        () => goToAnalysisCourse("forecast")
       );
     }
 
@@ -2507,7 +2521,10 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
             ),
             analysisStarted && h("div", { className: "guided-analysis-course" },
               activeType === "SVT" && dashboardData
-                ? renderSvtAnalysisCourse()
+                ? h("div", {
+                  className: `analysis-course-transition direction-${analysisCourseDirection}`,
+                  key: analysisCourse,
+                }, renderSvtAnalysisCourse())
                 : [
                   h("div", { className: "course-intro", key: "intro" },
                     h("span", null, "첫 번째 코스"),
