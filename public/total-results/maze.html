@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maze/ RSVP Analyzer</title>
+    <style>
+        :root { 
+            --bg: #f8fafc; --panel: #ffffff; --ink: #0f172a; --muted: #64748b; 
+            --line: #e2e8f0; --blue: #2563eb; --green: #059669; --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); 
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: var(--bg); color: var(--ink); margin: 0; padding: 40px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        ::-webkit-scrollbar { height: 6px; width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+        
+        .toggle-btn { flex: 1; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 800; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+        .toggle-active { background: var(--ink); color: white; }
+        .toggle-inactive { background: transparent; color: var(--muted); }
+        .dataset-tabs { background: var(--panel); padding: 6px; border-radius: 12px; border: 1px solid var(--line); display: flex; width: 180px; box-shadow: var(--shadow); }
+        .dataset-tab { flex: 1; text-align: center; text-decoration: none; padding: 10px 16px; border-radius: 8px; font-weight: 800; color: var(--muted); font-size: 14px; }
+        .dataset-tab.active { background: var(--ink); color: #ffffff; }
+        .cluster-card:hover { border-color: #94a3b8 !important; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        
+        <header style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 24px;">
+            <div>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                    <div style="width:24px; height:24px; background: linear-gradient(135deg, #ef4444, #3b82f6, #10b981); border-radius:6px;"></div>
+                    <h2 style="margin:0; font-size:18px; font-weight:900; letter-spacing:-0.02em;">Maze RSVP Analyzer</h2>
+                </div>
+                <p id="datasetSummary" style="font-size:14px; color:var(--muted); margin:0; font-weight:500;">데이터를 불러오는 중...</p>
+            </div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <div class="dataset-tabs" aria-label="결과 탭">
+                    <a class="dataset-tab" href="index.html">SVT</a>
+                    <a class="dataset-tab active" href="maze.html" aria-current="page">RSVP</a>
+                </div>
+                <div style="background: var(--panel); padding: 6px; border-radius: 12px; border: 1px solid var(--line); display: flex; width: 220px; box-shadow: var(--shadow);">
+                    <button id="modeIndividual" class="toggle-btn toggle-active">개인 분석</button>
+                    <button id="modeGroup" class="toggle-btn toggle-inactive">그룹별 분석</button>
+                </div>
+            </div>
+        </header>
+
+        <div id="individualView">
+            
+            <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: var(--shadow); margin-bottom:24px;">
+                <h3 style="font-size: 14px; font-weight: 800; color: var(--ink); margin: 0 0 12px 0;">검색</h3>
+                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <input type="text" id="nameSearch" placeholder="ID 입력" style="flex-grow: 1; padding: 12px 16px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 14px; outline: none;">
+                    <button id="searchBtn" style="background: var(--blue); color: white; border: none; border-radius: 8px; padding: 0 24px; font-weight: 700; font-size: 14px; cursor: pointer;">검색</button>
+                    <button id="clearSelection" style="background: #f1f5f9; color: #475569; border: 1px solid var(--line); border-radius: 8px; padding: 0 24px; font-weight: 700; font-size: 14px; cursor: pointer;">초기화</button>
+                </div>
+                <div id="participantPills" style="display: flex; gap: 10px; overflow-x: auto; padding-bottom: 8px;"></div>
+            </div>
+
+            <section class="analysis-workspace" style="display: flex; flex-direction: column; gap: 24px;">
+                <section class="panel-section" style="background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 24px; box-shadow: var(--shadow);">
+                    <div style="margin-bottom: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px;">
+                        <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--muted); font-weight: 700; margin: 0 0 4px 0;">COHORT METRIC SUMMARY</p>
+                        <h2 style="font-size: 22px; margin: 0; font-weight: 800;">종합 분석 통계 요약</h2>
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 24px;">
+                        <article style="background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 20px; text-align: center;">
+                            <h3 style="font-size: 13px; margin: 0 0 10px 0; color: var(--muted); font-weight: 700;">회귀 차수 (POLYNOMIAL DEGREE)</h3>
+                            <div id="polyDegreeValue" style="font-size: 32px; font-weight: 800; color: #475569; margin: 6px 0;">--</div>
+                        </article>
+                        <article style="background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 20px; text-align: center;">
+                            <h3 style="font-size: 13px; margin: 0 0 10px 0; color: var(--muted); font-weight: 700;">평균 반응 속도 (MEAN RT)</h3>
+                            <div id="avgRtValue" style="font-size: 32px; font-weight: 800; color: var(--blue); margin: 6px 0;">--s</div>
+                        </article>
+                        <article style="background: #f8fafc; border: 1px solid var(--line); border-radius: 16px; padding: 20px; text-align: center;">
+                            <h3 style="font-size: 13px; margin: 0 0 10px 0; color: var(--muted); font-weight: 700;">정답률 (CORRECTION RATE)</h3>
+                            <div id="avgAccuracyValue" style="font-size: 32px; font-weight: 800; color: var(--green); margin: 6px 0;">--%</div>
+                        </article>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div><h3 style="font-size: 14px; text-align: center;">MAZE 반응시간 및 정답률 변화</h3><svg id="mazeVectorChart" width="100%" height="440" viewBox="0 0 540 440" style="background:#ffffff; border:1px solid var(--line); border-radius:12px;"></svg></div>
+                        <div><h3 style="font-size: 14px; text-align: center;">RSVP 반응시간 및 정답률 변화</h3><svg id="rsvpVectorChart" width="100%" height="440" viewBox="0 0 540 440" style="background:#ffffff; border:1px solid var(--line); border-radius:12px;"></svg></div>
+                    </div>
+                </section>
+
+                <section class="panel-section" style="background: var(--panel); border: 1px solid var(--line); border-radius: 22px; padding: 24px; box-shadow: var(--shadow);">
+                    <div style="margin-bottom: 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px;">
+                        <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 700; margin: 0 0 4px 0;">SELECTED PARTICIPANT TRENDS</p>
+                        <h2 style="font-size: 22px; margin: 0; font-weight: 800;">차수별 변화 (RT & 정답률)</h2>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div style="border: 1px solid var(--line); border-radius: 16px; padding: 16px;"><h3 style="font-size: 14px; font-weight: 800; color: #475569; margin: 0 0 16px 0;">MAZE - RT</h3><svg id="mazeRtTrendChart" width="100%" height="220" viewBox="0 0 500 220" style="overflow:visible;"></svg></div>
+                        <div style="border: 1px solid var(--line); border-radius: 16px; padding: 16px;"><h3 style="font-size: 14px; font-weight: 800; color: #475569; margin: 0 0 16px 0;">MAZE - Accuracy</h3><svg id="mazeAccTrendChart" width="100%" height="220" viewBox="0 0 500 220" style="overflow:visible;"></svg></div>
+                        <div style="border: 1px solid var(--line); border-radius: 16px; padding: 16px;"><h3 style="font-size: 14px; font-weight: 800; color: #475569; margin: 0 0 16px 0;">RSVP - RT</h3><svg id="rsvpRtTrendChart" width="100%" height="220" viewBox="0 0 500 220" style="overflow:visible;"></svg></div>
+                        <div style="border: 1px solid var(--line); border-radius: 16px; padding: 16px;"><h3 style="font-size: 14px; font-weight: 800; color: #475569; margin: 0 0 16px 0;">RSVP - Accuracy</h3><svg id="rsvpAccTrendChart" width="100%" height="220" viewBox="0 0 500 220" style="overflow:visible;"></svg></div>
+                    </div>
+                </section>
+
+                <div id="individualModelPanel" style="display:none; flex-direction:column; gap:20px;">
+                    <div style="border-bottom: 2px solid var(--line); padding-bottom: 16px;">
+                        <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">INDIVIDUAL ANALYSIS</p>
+                        <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">반응시간, 정확도 분석 모델</h2>
+                        <p id="individualMetaLabel" style="font-size: 13px; color: var(--muted); margin: 0;">-</p>
+                    </div>
+                    <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                            <span style="font-weight: 800; background:#f1f5f9; padding:4px 10px; border-radius:8px;">MAZE 모델</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;"><svg id="stylizedMazeRt" width="100%" height="250" viewBox="0 0 450 250"></svg><svg id="stylizedMazeAcc" width="100%" height="250" viewBox="0 0 450 250"></svg></div>
+                        <div id="mazeFormulaFooter" style="margin-top: 16px; background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 12px; font-family: monospace;"></div>
+                    </div>
+                    <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                            <span style="font-weight: 800; background:#f1f5f9; padding:4px 10px; border-radius:8px;">RSVP 모델</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;"><svg id="stylizedRsvpRt" width="100%" height="250" viewBox="0 0 450 250"></svg><svg id="stylizedRsvpAcc" width="100%" height="250" viewBox="0 0 450 250"></svg></div>
+                        <div id="rsvpFormulaFooter" style="margin-top: 16px; background: #f8fafc; border: 1px solid var(--line); border-radius: 8px; padding: 12px; font-size: 12px; font-family: monospace;"></div>
+                    </div>
+                </div>
+
+                <div id="transitionPanel" style="display:none; flex-direction:column; gap:20px; border-top:2px dashed var(--line); padding-top:24px;">
+                    <div style="margin-bottom: 8px;">
+                        <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">ANSWER TRANSITION BY NEXT TEST</p>
+                        <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">이전 &rarr; 다음 정오답 변화</h2>
+                    </div>
+                    <div id="transitionRoundsContainer" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:8px;"></div>
+                    <div id="transitionMatricesContainer" style="display:flex; gap:15px; overflow-x:auto; padding-bottom:8px;"></div>
+                    <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px;">
+                        <svg id="transitionLineChart" width="100%" height="250" viewBox="0 0 800 250" style="overflow:visible;"></svg>
+                    </div>
+                </div>
+                
+                <div id="detailPanel"></div>
+            </section>
+        </div>
+
+        <div id="groupView" style="display:none; flex-direction:column; gap:24px;">
+            
+            <div style="margin-bottom: 10px;">
+                <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">5-ROUND CHANGE CLUSTERING</p>
+                <h2 style="font-size: 32px; margin: 0 0 8px 0; font-weight: 900;">그룹별 분석</h2>
+                <p style="font-size: 14px; color: var(--muted); margin: 0;">baseline 변화 곡선 DTW 거리 기반 응집형 군집화</p>
+            </div>
+
+            <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                <h3 style="font-size: 14px; font-weight: 800; color: var(--ink); margin: 0 0 16px 0;">그룹 선택</h3>
+                <div id="clusterListContainer" style="display:flex; flex-direction:column; gap:12px; max-height: 400px; overflow-y:auto; padding-right:10px;">
+                    <p style="color:var(--muted); font-size:14px;">클러스터 모델을 로딩 중입니다...</p>
+                </div>
+            </div>
+
+            <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                <div style="margin-bottom: 20px;">
+                    <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">2D TENDENCY MANIFOLD</p>
+                    <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">참가자 경향 지도</h2>
+                </div>
+                <div id="manifoldLegend" style="display:flex; gap:16px; font-size:12px; font-weight:700; color:var(--ink); margin-bottom:16px; flex-wrap:wrap;"></div>
+                <div style="border:1px solid var(--line); border-radius:12px; overflow:hidden; background:#ffffff;">
+                    <svg id="manifoldSvg" width="100%" height="450" viewBox="0 0 800 450"></svg>
+                </div>
+            </div>
+
+            <div id="priorityGraphPanel" style="display:none; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                <div style="margin-bottom: 20px;">
+                    <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">PRIORITY GRAPH</p>
+                    <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">RT × 정답률</h2>
+                </div>
+                <div id="priorityGraphPills" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:24px;"></div>
+                <div style="border:1px solid var(--line); border-radius:12px; padding:20px 20px 40px 20px; background:#ffffff; overflow:visible;">
+                    <svg id="prioritySvg" width="100%" height="400" viewBox="0 0 800 400" style="overflow:visible;"></svg>
+                </div>
+                <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px; margin-top:16px;">
+                    <div style="background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:16px;">
+                        <div style="font-size:11px; color:var(--muted); font-weight:700; margin-bottom:4px;">차수 (Total Rounds)</div>
+                        <div id="pgRounds" style="font-size:24px; font-weight:900; color:var(--ink);">--</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:16px;">
+                        <div style="font-size:11px; color:var(--muted); font-weight:700; margin-bottom:4px;">평균 RT</div>
+                        <div id="pgRt" style="font-size:24px; font-weight:900; color:var(--ink);">--s</div>
+                    </div>
+                    <div style="background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:16px;">
+                        <div style="font-size:11px; color:var(--muted); font-weight:700; margin-bottom:4px;">평균 정답률</div>
+                        <div id="pgAcc" style="font-size:24px; font-weight:900; color:var(--ink);">--%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="groupModelPanel" style="display:none; flex-direction:column; gap:20px;">
+                <div style="border-bottom: 2px solid var(--line); padding-bottom: 16px; margin-top:10px;">
+                    <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">GROUP ANALYSIS MODELS</p>
+                    <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">그룹 평균 반응시간, 정확도 모델</h2>
+                    <p id="groupMetaLabel" style="font-size: 13px; color: var(--muted); margin: 0;">-</p>
+                </div>
+                <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="font-weight: 800; background:#f1f5f9; padding:4px 10px; border-radius:8px;">MAZE 그룹 평균 모델</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+                        <svg id="gStylizedMazeRt" width="100%" height="250" viewBox="0 0 450 250"></svg>
+                        <svg id="gStylizedMazeAcc" width="100%" height="250" viewBox="0 0 450 250"></svg>
+                    </div>
+                </div>
+                <div style="background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; box-shadow: var(--shadow);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                        <span style="font-weight: 800; background:#f1f5f9; padding:4px 10px; border-radius:8px;">RSVP 그룹 평균 모델</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+                        <svg id="gStylizedRsvpRt" width="100%" height="250" viewBox="0 0 450 250"></svg>
+                        <svg id="gStylizedRsvpAcc" width="100%" height="250" viewBox="0 0 450 250"></svg>
+                    </div>
+                </div>
+            </div>
+
+            <div id="groupTransitionPanel" style="display:none; flex-direction:column; gap:20px; border-top:2px dashed var(--line); padding-top:24px;">
+                <div style="margin-bottom: 8px;">
+                    <p style="text-transform: uppercase; font-size: 11px; letter-spacing: 0.1em; color: var(--blue); font-weight: 800; margin: 0 0 4px 0;">GROUP ANSWER TRANSITION</p>
+                    <h2 style="font-size: 22px; margin: 0 0 8px 0; font-weight: 900;">그룹 통합 이전 &rarr; 다음 정오답 변화</h2>
+                </div>
+                <div id="gTransitionRoundsContainer" style="display:flex; gap:10px; overflow-x:auto; padding-bottom:8px;"></div>
+                <div id="gTransitionMatricesContainer" style="display:flex; gap:15px; overflow-x:auto; padding-bottom:8px;"></div>
+                <div style="background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px;">
+                    <svg id="gTransitionLineChart" width="100%" height="250" viewBox="0 0 800 250" style="overflow:visible;"></svg>
+                </div>
+            </div>
+            
+            <div id="groupDetailPanel" style="display:none;"></div>
+
+        </div> </div>
+    <script src="maze-analyzer-data.js"></script>
+    <script src="maze-dashboard.js"></script>
+</body>
+</html>

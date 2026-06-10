@@ -18,8 +18,7 @@ export default function TotalResultsIndex() {
             </div>
             <div className="dataset-switcher" data-dataset-switcher aria-label="결과 탭">
               <a className="dataset-option" data-dataset-option="svt" href="index.html">SVT</a>
-              <a className="dataset-option" data-dataset-option="rsvp" href="index.html?dataset=rsvp">RSVP</a>
-              <a className="dataset-option" data-dataset-option="maze" href="index.html?dataset=maze">MAZE</a>
+              <a className="dataset-option" href="maze.html">RSVP</a>
             </div>
           </div>
         </nav>

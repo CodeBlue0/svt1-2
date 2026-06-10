@@ -10,7 +10,7 @@
       node.textContent = "";
       [
         ["svt", "SVT", "index.html"],
-        ["maze", "MAZE", "maze.html"],
+        ["rsvp", "RSVP", "maze.html"],
       ].forEach(([key, label, href]) => {
         const link = document.createElement("a");
         link.className = `dataset-option${key === "svt" ? " active" : ""}`;

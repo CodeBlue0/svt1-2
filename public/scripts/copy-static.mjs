@@ -12,7 +12,6 @@ const staticPaths = [
 await mkdir("dist", { recursive: true });
 
 for (const path of staticPaths) {
-  const source = `public/${path}`;
-  if (!existsSync(source)) continue;
-  await cp(source, `dist/${path}`, { recursive: true });
+  if (!existsSync(path)) continue;
+  await cp(path, `dist/${path}`, { recursive: true });
 }

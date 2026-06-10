@@ -3,8 +3,7 @@ import react from "@vitejs/plugin-react";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const projectRoot = dirname(fileURLToPath(import.meta.url));
-const publicRoot = resolve(projectRoot, "public");
+const publicRoot = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: publicRoot,
@@ -15,7 +14,7 @@ export default defineConfig({
     port: 5173,
   },
   build: {
-    outDir: resolve(projectRoot, "dist"),
+    outDir: resolve(publicRoot, "dist"),
     emptyOutDir: true,
     rollupOptions: {
       input: {
