@@ -2,16 +2,19 @@
   const params = new URLSearchParams(window.location.search);
   const requestedDatasetKey = (params.get("dataset") || "svt").toLowerCase();
   const TASK_DATASETS = {
-    rsvp: { key: "rsvp", label: "RSVP", taskQuery: "rsvp", itemFallback: "RSVP 문항" },
-    maze: { key: "maze", label: "MAZE", taskQuery: "maze", itemFallback: "MAZE 문항" },
+    rsvp: { key: "rsvp", label: "RSVP", manifestTaskQuery: "maze", rowTaskQuery: "rsvp", itemFallback: "RSVP 문항" },
+    maze: { key: "maze", label: "MAZE", manifestTaskQuery: "maze", rowTaskQuery: "maze", itemFallback: "MAZE 문항" },
   };
   const datasetConfig = TASK_DATASETS[requestedDatasetKey] || null;
   const datasetKey = datasetConfig?.key || "svt";
   const PAGE_SIZE = 1000;
+  const CACHE_VERSION = "task-dashboard-v2";
+  const CACHE_TTL_MS = 30 * 60 * 1000;
   activateDatasetSwitcher(datasetKey);
 
   if (!datasetConfig) {
     window.SVT_DASHBOARD_DATA_READY = loadScriptOnce("data.js").then(() => window.SVT_DASHBOARD_DATA);
+    prefetchTaskDatasets();
     return;
   }
 
@@ -20,6 +23,7 @@
   window.SVT_DASHBOARD_DATA_READY = loadTaskDashboardData(datasetConfig)
     .then((payload) => {
       window.SVT_DASHBOARD_DATA = payload;
+      prefetchTaskDatasets(datasetConfig.key);
       return payload;
     })
     .catch((error) => {
@@ -39,6 +43,9 @@
     });
 
   async function loadTaskDashboardData(taskConfig) {
+    const cachedPayload = readCachedPayload(taskConfig);
+    if (cachedPayload) return cachedPayload;
+
     const config = window.SVT_SUPABASE_CONFIG || {};
     if (!config.url || !config.anonKey || !window.supabase?.createClient) {
       throw new Error(`Supabase 설정이 없어 ${taskConfig.label} 데이터를 불러올 수 없습니다.`);
@@ -51,7 +58,7 @@
     const { data: manifests, error } = await client
       .from(manifestTable)
       .select(`id, ${participantColumn}, task, ${dateColumn}, loaded_at`)
-      .ilike("task", `%${taskConfig.taskQuery}%`)
+      .ilike("task", `%${taskConfig.manifestTaskQuery}%`)
       .order(dateColumn, { ascending: true })
       .limit(5000);
 
@@ -59,7 +66,51 @@
     const usableManifests = (manifests || []).filter((row) => row.id && row[participantColumn]);
     const trialsByManifest = await fetchTaskRowsByManifest(client, usableManifests.map((manifest) => manifest.id), taskConfig);
 
-    return buildPayload(usableManifests, trialsByManifest, { participantColumn, dateColumn, taskConfig });
+    const payload = buildPayload(usableManifests, trialsByManifest, { participantColumn, dateColumn, taskConfig });
+    writeCachedPayload(taskConfig, payload);
+    return payload;
+  }
+
+  function cacheKey(taskConfig) {
+    return `svt-dashboard:${CACHE_VERSION}:${taskConfig.key}`;
+  }
+
+  function readCachedPayload(taskConfig) {
+    try {
+      const raw = window.sessionStorage?.getItem(cacheKey(taskConfig));
+      if (!raw) return null;
+      const cached = JSON.parse(raw);
+      if (!cached || Date.now() - Number(cached.savedAt || 0) > CACHE_TTL_MS) {
+        window.sessionStorage?.removeItem(cacheKey(taskConfig));
+        return null;
+      }
+      return cached.payload || null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function writeCachedPayload(taskConfig, payload) {
+    try {
+      window.sessionStorage?.setItem(cacheKey(taskConfig), JSON.stringify({
+        savedAt: Date.now(),
+        payload,
+      }));
+    } catch (_error) {
+      // Cache failure should never block the dashboard.
+    }
+  }
+
+  function prefetchTaskDatasets(currentKey = "") {
+    const start = () => {
+      Object.values(TASK_DATASETS)
+        .filter((taskConfig) => taskConfig.key !== currentKey && !readCachedPayload(taskConfig))
+        .forEach((taskConfig) => {
+          loadTaskDashboardData(taskConfig).catch(() => {});
+        });
+    };
+    if ("requestIdleCallback" in window) window.requestIdleCallback(start, { timeout: 3000 });
+    else window.setTimeout(start, 800);
   }
 
   async function fetchTaskRowsByManifest(client, manifestIds, taskConfig) {
@@ -71,7 +122,7 @@
           .from("maze_trials")
           .select("manifest_id,row_number,task,trial_index,stimulus_id,phrase_type,correct,rt,response_time,korean_phrase,english_phrase,prefix,correct_word,distractor_word,selected_word,selected_phrase,response,experiment_datetime,event_timestamp")
           .in("manifest_id", batchIds)
-          .ilike("task", `%${taskConfig.taskQuery}%`)
+          .ilike("task", `%${taskConfig.rowTaskQuery}%`)
           .order("manifest_id", { ascending: true })
           .order("row_number", { ascending: true })
           .range(from, from + PAGE_SIZE - 1);

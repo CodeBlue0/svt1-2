@@ -45,6 +45,7 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
     "current_education",
   ];
   const FIXED_DECIMAL_COLUMNS = new Set(["rt", "response_time", "rsvp_word_duration", "rsvp_blank_duration"]);
+  let totalResultsPrefetchPromise = null;
   const FALLBACK_FILES = [
     {
       id: "fallback-svt",
@@ -71,6 +72,17 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
   function configuredSupabase() {
     const config = window.SVT_SUPABASE_CONFIG || {};
     return Boolean(config.url && config.anonKey && window.supabase?.createClient);
+  }
+
+  function prefetchTotalResults() {
+    if (totalResultsPrefetchPromise) return totalResultsPrefetchPromise;
+    const warmCache = (url) => fetch(url, { cache: "force-cache" }).catch(() => null);
+    totalResultsPrefetchPromise = Promise.allSettled([
+      import("./total-results/TotalResultsIndex.jsx"),
+      warmCache("./total-results/index.html"),
+      warmCache("./total-results/data.js"),
+    ]);
+    return totalResultsPrefetchPromise;
   }
 
   function normalizeParticipant(row) {
@@ -1953,6 +1965,16 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
     }, []);
 
     useEffect(() => {
+      const start = () => prefetchTotalResults();
+      if ("requestIdleCallback" in window) {
+        const idleId = window.requestIdleCallback(start, { timeout: 2500 });
+        return () => window.cancelIdleCallback?.(idleId);
+      }
+      const timeoutId = window.setTimeout(start, 1200);
+      return () => window.clearTimeout(timeoutId);
+    }, []);
+
+    useEffect(() => {
       setSelectedPreviewRound("all");
       setPreviewGraphMode("trajectory");
       setAnalysisCourse("rt-accuracy");
@@ -2515,7 +2537,13 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
       h("main", { className: submittedName ? `landing-shell is-confirmed${analysisStarted ? " is-analysis-expanded" : ""}` : "landing-shell" },
         h("nav", { className: "top-bar", "aria-label": "SVT navigation" },
           h("div", { className: "brand" }, "SVT Studio"),
-          h("a", { className: "global-analysis-link", href: "./total-results/" }, "전체 데이터 분석")
+          h("a", {
+            className: "global-analysis-link",
+            href: "./total-results/",
+            onMouseEnter: prefetchTotalResults,
+            onFocus: prefetchTotalResults,
+            onTouchStart: prefetchTotalResults,
+          }, "전체 데이터 분석")
         ),
         h("section", { className: "landing-hero", "aria-label": "실험 파일 확인" },
           !submittedName && h("div", { className: "hero-copy" },
