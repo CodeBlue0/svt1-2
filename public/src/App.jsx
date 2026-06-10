@@ -78,7 +78,6 @@ import React, { createElement as h, useEffect, useMemo, useRef, useState } from 
     if (totalResultsPrefetchPromise) return totalResultsPrefetchPromise;
     const warmCache = (url) => fetch(url, { cache: "force-cache" }).catch(() => null);
     totalResultsPrefetchPromise = Promise.allSettled([
-      import("./total-results/TotalResultsIndex.jsx"),
       warmCache("./total-results/index.html"),
       warmCache("./total-results/data.js"),
     ]);
